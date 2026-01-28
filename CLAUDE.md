@@ -8,7 +8,7 @@ For full multi-model support (GPT-5.2 for planning/reflection, GPT-5.2-Codex for
 
 ### 1. Configure Claude Code MCP
 
-Add to your Claude Code MCP config (`~/.claude/mcp.json` or project `.mcp.json`):
+Create `.mcp.json` in your project root:
 
 ```json
 {
@@ -21,22 +21,44 @@ Add to your Claude Code MCP config (`~/.claude/mcp.json` or project `.mcp.json`)
 }
 ```
 
-### 2. Available via MCP
+Verify with: `claude mcp list` or `/mcp` in Claude Code session.
 
-Once configured, you have access to Codex tools:
-- `codex_exec` - Run GPT-5.2 or GPT-5.2-Codex for tasks
-- Use for: research, planning, implementation, reflection
+### 2. Available MCP Tools
+
+| Tool | Purpose | Key Parameters |
+|------|---------|----------------|
+| `codex` | Start new Codex session | `prompt` (required), `model`, `cwd`, `sandbox` |
+| `codex-reply` | Continue conversation | `threadId`, `prompt` |
+
+### 3. Calling Codex
+
+**For GPT-5.2 (planning/analysis):**
+```
+Use MCP tool "codex" with:
+- prompt: "Your task here"
+- model: "gpt-5.2"
+- cwd: "/path/to/project"
+```
+
+**For GPT-5.2-Codex (implementation):**
+```
+Use MCP tool "codex" with:
+- prompt: "Implement X per TASK.md"
+- model: "gpt-5.2-codex"
+- sandbox: "workspace-write"
+- cwd: "/path/to/project"
+```
 
 ### Model Assignments
 
 | Role | Model | How |
 |------|-------|-----|
 | Orchestrator | Claude (you) | Native |
-| Research | Claude + GPT-5.2 (parallel) | Native + MCP codex_exec |
-| Planner | GPT-5.2 | MCP codex_exec |
+| Research | Claude + GPT-5.2 (parallel) | Native + MCP `codex` |
+| Planner | GPT-5.2 | MCP `codex` |
 | Checker | Claude | Native |
-| Executor | GPT-5.2-Codex | MCP codex_exec |
-| Reflector | Claude + GPT-5.2 (parallel) | Native + MCP codex_exec |
+| Executor | GPT-5.2-Codex | MCP `codex` |
+| Reflector | Claude + GPT-5.2 (parallel) | Native + MCP `codex` |
 
 ---
 
@@ -84,12 +106,15 @@ Research phase for current project.
 
 **Parallel Research** (with Codex MCP):
 1. You (Claude) research via web search
-2. Simultaneously call GPT-5.2 via MCP:
+2. Simultaneously call GPT-5.2 via MCP tool `codex`:
+   ```json
+   {
+     "prompt": "Research best practices for [project type]: stack options, patterns, common pitfalls, potential risks. Output structured findings.",
+     "model": "gpt-5.2",
+     "cwd": "/path/to/project"
+   }
    ```
-   Use codex_exec with model gpt-5.2:
-   "Research best practices for [project type]: stack options, patterns, pitfalls, risks."
-   ```
-3. Merge findings, note disagreements
+3. Merge findings, note disagreements in disagreement register
 
 **Steps:**
 1. Parallel research (Claude + GPT-5.2)
@@ -118,12 +143,16 @@ Task includes:
 
 ### `/deadf:execute`
 Execute the current TASK.md:
-1. Call GPT-5.2-Codex via MCP to implement:
+1. Call GPT-5.2-Codex via MCP tool `codex`:
+   ```json
+   {
+     "prompt": "Read TASK.md and implement the task. Follow PATTERNS.md for architecture and WORKFLOW.md for process. Commit when done.",
+     "model": "gpt-5.2-codex",
+     "sandbox": "workspace-write",
+     "cwd": "/path/to/project"
+   }
    ```
-   Use codex_exec with model gpt-5.2-codex:
-   "Implement the task defined in TASK.md. Follow PATTERNS.md and WORKFLOW.md."
-   ```
-2. Run verification steps
+2. Run verification steps from TASK.md
 3. If pass → commit with proper format
 4. If fail → debug and retry
 
@@ -139,10 +168,13 @@ Post-task reflection. Run after EVERY outcome.
 
 **Parallel Analysis** (with Codex MCP):
 1. You (Claude) analyze the outcome
-2. Simultaneously call GPT-5.2 via MCP:
-   ```
-   Use codex_exec with model gpt-5.2:
-   "Analyze this task outcome: [outcome]. What patterns, pitfalls, or risks should we document?"
+2. Simultaneously call GPT-5.2 via MCP tool `codex`:
+   ```json
+   {
+     "prompt": "Analyze this task outcome: [success/failure/escalation]. Review what happened. What patterns should be documented? What pitfalls discovered? Any systemic risks? Output as diff proposals for PATTERNS.md, PITFALLS.md, or RISKS.md.",
+     "model": "gpt-5.2",
+     "cwd": "/path/to/project"
+   }
    ```
 3. Merge both analyses into unified diff proposals
 
