@@ -2,6 +2,44 @@
 
 You are operating the **deadf(ish)** development pipeline - a hybrid GSD + Conductor workflow with learning loops.
 
+## Setup: Multi-Model via Codex MCP
+
+For full multi-model support (GPT-5.2 for planning/reflection, GPT-5.2-Codex for implementation):
+
+### 1. Configure Claude Code MCP
+
+Add to your Claude Code MCP config (`~/.claude/mcp.json` or project `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "codex": {
+      "command": "codex",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+### 2. Available via MCP
+
+Once configured, you have access to Codex tools:
+- `codex_exec` - Run GPT-5.2 or GPT-5.2-Codex for tasks
+- Use for: research, planning, implementation, reflection
+
+### Model Assignments
+
+| Role | Model | How |
+|------|-------|-----|
+| Orchestrator | Claude (you) | Native |
+| Research | Claude + GPT-5.2 (parallel) | Native + MCP codex_exec |
+| Planner | GPT-5.2 | MCP codex_exec |
+| Checker | Claude | Native |
+| Executor | GPT-5.2-Codex | MCP codex_exec |
+| Reflector | Claude + GPT-5.2 (parallel) | Native + MCP codex_exec |
+
+---
+
 ## Philosophy
 
 - **Plan incrementally** - One track at a time, not all phases upfront
@@ -42,11 +80,22 @@ Interactive vision discovery session. Guides through:
 Output: Completed VISION.md
 
 ### `/deadf:research`
-Research phase for current project:
-1. Web search for stack options, patterns, pitfalls
+Research phase for current project.
+
+**Parallel Research** (with Codex MCP):
+1. You (Claude) research via web search
+2. Simultaneously call GPT-5.2 via MCP:
+   ```
+   Use codex_exec with model gpt-5.2:
+   "Research best practices for [project type]: stack options, patterns, pitfalls, risks."
+   ```
+3. Merge findings, note disagreements
+
+**Steps:**
+1. Parallel research (Claude + GPT-5.2)
 2. Document findings
-3. Seed living docs (TECH_STACK, PATTERNS, PITFALLS, RISKS)
-4. Create disagreement register if sources conflict
+3. Create disagreement register if sources conflict
+4. Seed living docs (TECH_STACK, PATTERNS, PITFALLS, RISKS)
 
 ### `/deadf:track <name>`
 Start a new track (feature/fix):
@@ -69,7 +118,11 @@ Task includes:
 
 ### `/deadf:execute`
 Execute the current TASK.md:
-1. Implement the task
+1. Call GPT-5.2-Codex via MCP to implement:
+   ```
+   Use codex_exec with model gpt-5.2-codex:
+   "Implement the task defined in TASK.md. Follow PATTERNS.md and WORKFLOW.md."
+   ```
 2. Run verification steps
 3. If pass → commit with proper format
 4. If fail → debug and retry
@@ -82,7 +135,16 @@ Verify current task against:
 - Source fidelity (if using existing data)
 
 ### `/deadf:reflect`
-Post-task reflection. Run after EVERY outcome:
+Post-task reflection. Run after EVERY outcome.
+
+**Parallel Analysis** (with Codex MCP):
+1. You (Claude) analyze the outcome
+2. Simultaneously call GPT-5.2 via MCP:
+   ```
+   Use codex_exec with model gpt-5.2:
+   "Analyze this task outcome: [outcome]. What patterns, pitfalls, or risks should we document?"
+   ```
+3. Merge both analyses into unified diff proposals
 
 **On success:**
 - Did we use a new approach? → Log as experimental pattern
