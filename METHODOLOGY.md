@@ -167,6 +167,19 @@ Triggered after:
 - Task failed verification ❌
 - Validation escalated to human ⏫
 
+**Parallel Analysis** (when using multi-model setup):
+```
+Outcome
+   ├──► Analyzer 1 (e.g., Claude)
+   └──► Analyzer 2 (e.g., GPT)
+          │
+          ▼
+   Synthesize + merge findings
+          │
+          ▼
+   Validate merged diffs
+```
+
 Questions:
 1. What changed? (facts)
 2. What did we learn? (generalizable)
