@@ -74,7 +74,14 @@ Use MCP tool "codex" with:
 ### `/deadf:init <name>`
 Initialize a new project with deadf(ish) structure.
 
-Creates:
+**Preflight Detection** — Auto-detect scenario before proceeding:
+- **Greenfield** (no docs, no code) → Brainstorm flow (existing)
+- **Brownfield** (no docs, has code) → Interactive mapping → seamless brainstorm transition
+- **Returning** (has docs: VISION.md etc.) → Restart / Refine / Continue
+
+Heuristics (brownfield = 2+ signals): `.git/` exists, source files present, `package.json`/`go.mod`/etc., CI config, README.
+
+Creates (all scenarios converge to):
 ```
 <name>/
 ├── VISION.md
@@ -90,6 +97,35 @@ Creates:
 ├── tracks.md
 └── tracks/
 ```
+
+#### Greenfield Flow
+No code detected → proceed directly to `/deadf:brainstorm`.
+
+#### Brownfield Flow
+Code detected, no living docs → interactive mapping:
+
+1. **Existing doc intake**: Read README, CONTRIBUTING, etc. Distill as *hints* — question, don't trust. Present summary: "Here's what I found. Correct me."
+2. **Dynamic analysis depth**: Orchestrator decides 1–4 analysis passes based on codebase complexity:
+   - Pass 1: General structure (entry points, framework, deps) — always
+   - Pass 2: Architecture patterns (routing, data layer, auth) — medium+ projects
+   - Pass 3: Testing/CI/deployment — if CI config exists
+   - Pass 4: Domain model deep-dive — large/complex codebases
+3. **Git history signals**: `git log --stat` for hot files (recent churn) vs stale files. Weight confidence by activity.
+4. **Structured per-category confirmation**: Present findings category by category (stack, patterns, risks, etc.). User confirms/corrects each before proceeding.
+5. **Seamless transition**: After mapping, ask "What do you want to work on?" — flows into brainstorm for VISION completion or directly to `/deadf:track` if vision is clear.
+
+#### Returning Flow
+Living docs detected (VISION.md exists) → offer:
+- **Restart**: Wipe docs, start fresh
+- **Refine**: Update specific docs (e.g., stack changed, new patterns)
+- **Continue**: Load STATE.md, resume where left off
+
+#### Agent Failure Handling
+If any analysis pass fails or produces low-confidence results:
+- Show partial results with confidence markers
+- Offer retry for failed category
+- Fallback: skip to interactive brainstorm (user provides info manually)
+- Never block the pipeline on a failed mapper
 
 ### `/deadf:brainstorm`
 Interactive vision discovery session. Guides through:
@@ -203,6 +239,44 @@ Show current position:
 
 ### `/deadf:next`
 Shortcut: task → execute → verify → reflect in one flow.
+
+---
+
+## Context Budget
+
+ALL living docs combined MUST stay under **5000 tokens**. Machine-optimized YAML format, not prose.
+
+### Token Targets
+
+| Doc | Budget |
+|-----|--------|
+| VISION.md | 300t |
+| ROADMAP.md | 500t |
+| STATE.md | 200t |
+| TECH_STACK.md | 400t |
+| PATTERNS.md | 400t |
+| PITFALLS.md | 300t |
+| RISKS.md | 300t |
+| WORKFLOW.md | 400t |
+| PRODUCT.md | 400t |
+| GLOSSARY.md | 200t |
+
+### Smart Loading (per track type)
+
+Only load docs relevant to the current track (~1500–2000t per session):
+
+| Track Type | Load |
+|------------|------|
+| UI/frontend | VISION, PATTERNS, WORKFLOW |
+| API/backend | VISION, PATTERNS, TECH_STACK |
+| Database | VISION, TECH_STACK, PRODUCT |
+| Auth/security | VISION, PATTERNS, RISKS |
+| Refactor | VISION, PITFALLS, PATTERNS |
+| Ambiguous | VISION, PATTERNS, RISKS, PITFALLS |
+
+### Compression Principle
+
+If a doc exceeds its budget: compress, don't split. Remove examples, collapse tables, use YAML shorthand. Split into a separate file only when a section exceeds 500t on its own.
 
 ---
 
