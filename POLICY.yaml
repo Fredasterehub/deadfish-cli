@@ -1,0 +1,90 @@
+# deadf(ish) Pipeline — POLICY.yaml
+# Schema version: 2.4.2
+# Defines mode-specific behavior for notifications, approvals, and escalation.
+# Referenced by Clawdbot orchestrator during cycle execution.
+
+# --- Mode Definitions ---
+# mode is set in STATE.yaml (yolo | hybrid | interactive)
+# This file defines what each mode means.
+
+modes:
+  yolo:
+    description: "Full autonomy. Pipeline runs without human intervention unless stuck."
+    notifications:
+      track_complete: silent
+      new_track_starting: silent
+      task_complete: silent
+      stuck: pause                # Always pause on stuck
+      triple_fail_rollback: pause # Always pause on 3x fail
+      budget_75_percent: warn
+      complete: summary
+    approvals:
+      new_track: false
+      task_start: false
+
+  hybrid:
+    description: "Autonomous execution with human checkpoints at track boundaries."
+    notifications:
+      track_complete: notify
+      new_track_starting: notify  # Ask approval before starting new track
+      task_complete: silent
+      stuck: pause
+      triple_fail_rollback: pause
+      budget_75_percent: warn
+      complete: summary
+    approvals:
+      new_track: true
+      task_start: false
+
+  interactive:
+    description: "Human approves each task. Maximum oversight."
+    notifications:
+      track_complete: notify
+      new_track_starting: notify
+      task_complete: notify       # Ask approval after each task
+      stuck: pause
+      triple_fail_rollback: pause
+      budget_75_percent: warn
+      complete: summary
+    approvals:
+      new_track: true
+      task_start: true
+
+# --- Escalation Thresholds ---
+escalation:
+  stuck_threshold: 3             # Consecutive no-progress cycles before escalation
+  max_retries: 3                 # Task failures before rollback + escalation
+  max_iterations: 200            # Ralph exits after this many iterations
+  max_hours: 24                  # Budget cap in hours
+  cycle_timeout_s: 600           # Ralph times out a cycle after this (seconds)
+
+# --- Rollback Policy ---
+rollback:
+  authority: clawdbot            # Only Clawdbot runs rollback commands
+  trigger: "task.retry_count >= task.max_retries"
+  steps:
+    - "git checkout -b rescue-{run_id}-{task_id}"   # Preserve failed work
+    - "git checkout main"
+    - "git reset --hard {last_good_commit}"          # Rollback to last known good
+  on_branch_exists: append_suffix  # rescue-...-2, rescue-...-3, etc.
+  on_dirty_tree: stash_first
+  on_no_commits: skip_rollback_escalate_only
+
+# --- Verification Policy ---
+verification:
+  # Combined verdict logic (deterministic wins)
+  #   verify.sh FAIL               → FAIL (always)
+  #   verify.sh PASS + LLM FAIL   → FAIL (conservative)
+  #   verify.sh PASS + LLM HUMAN  → pause for Fred (mode-dependent)
+  #   verify.sh PASS + LLM PASS   → PASS
+  #   parse failure after retry    → NEEDS_HUMAN
+  #   verify.sh JSON invalid       → CYCLE_FAIL (script bug)
+  format_repair_retries: 1         # Max retries for sentinel parse failures
+
+# --- Baseline Update Policy ---
+baseline:
+  # last_good updates ONLY after verify PASS + reflect complete
+  # last_cycle updates after verify PASS (before reflect)
+  # loop.stuck_count resets to 0 on PASS, +1 on no-progress
+  # loop.iteration ALWAYS increments, every cycle
+  no_progress_definition: "same commit hash AND same test count after full execute attempt"

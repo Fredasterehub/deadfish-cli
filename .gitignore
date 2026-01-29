@@ -1,18 +1,50 @@
-# OS
+# === OS ===
 .DS_Store
 Thumbs.db
+Desktop.ini
+._*
 
-# Editor
+# === Editor / IDE ===
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.project
+.settings/
 
-# Project-specific (when used as template)
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.eggs/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# === Shell ===
+*.sh.bak
+
+# === deadf(ish) Pipeline Runtime State ===
+# The .deadf/ directory holds runtime state (locks, logs) — never commit
+.deadf/
+
+# === Project Execution State (template outputs) ===
+# These are generated per-project when used as a template
 TASK.md
 STATE.md
 tracks/*/
 pivots/
 
-# Logs
+# === Logs ===
 *.log
