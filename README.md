@@ -204,10 +204,25 @@ This pipeline evolves through use. If you find improvements:
 - **Google Conductor** - Learning loops, living docs
 - Built with Claude + GPT collaboration
 
+## Recent Changes
+
+<!-- AUTO-GENERATED: run ./scripts/update-changelog.sh to refresh -->
+
+| Commit | Change |
+|--------|--------|
+| `adddf1f` | **feat(brownfield):** Convert all templates to machine-optimized YAML format |
+| `b78ebfc` | **feat(brownfield):** Add brownfield/returning init flows and context budget |
+| `c62725a` | **fix:** Accurate Codex MCP tool syntax |
+| `56434f2` | **feat:** Add Codex MCP integration for multi-model support |
+| `60351f1` | **feat:** Add parallel reflection analysis |
+| `a64b29a` | **feat:** Initial deadf(ish) pipeline release |
+
+<!-- END AUTO-GENERATED -->
+
 ## License
 
 MIT
 
 ---
 
-*deadf(ish) - Because dead fish go with the flow, but we don't.* 🐟💀
+*Only dead fish follow the flow.* 🐟💀
