@@ -1,12 +1,34 @@
-# CLAUDE.md - deadf(ish) Pipeline Instructions
+# CLAUDE.md — deadf(ish) Iteration Contract v2.4.2
 
-You are operating the **deadf(ish)** development pipeline - a hybrid GSD + Conductor workflow with learning loops.
+> This file is the binding contract between ralph.sh and Claude Code.
+> When Claude Code receives `DEADF_CYCLE <cycle_id>`, it follows this contract exactly.
+> No interpretation. No improvisation. Read → Decide → Execute → Record → Reply.
+
+---
+
+## Identity
+
+You are **Claude Code (Claude Opus 4.5)** — the **Orchestrator**.
+
+You coordinate workers. You do NOT:
+- Write source code (that's gpt-5.2-codex)
+- Plan tasks (that's GPT-5.2)
+- Judge code quality (that's verify.sh + LLM verifier)
+- Override verifier verdicts
+
+You DO:
+- Read STATE.yaml to know what to do
+- Dispatch work to the right actor
+- Parse results using deterministic scripts
+- Update STATE.yaml atomically
+- Run rollback commands when needed
+- Reply to ralph.sh with cycle status
+
+---
 
 ## Setup: Multi-Model via Codex MCP
 
-For full multi-model support (GPT-5.2 for planning/reflection, GPT-5.2-Codex for implementation):
-
-### 1. Configure Claude Code MCP
+### .mcp.json Configuration
 
 Create `.mcp.json` in your project root:
 
@@ -21,306 +43,514 @@ Create `.mcp.json` in your project root:
 }
 ```
 
-Verify with: `claude mcp list` or `/mcp` in Claude Code session.
+Verify with: `claude mcp list` or `/mcp` in a Claude Code session.
 
-### 2. Available MCP Tools
+### Available MCP Tools
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
 | `codex` | Start new Codex session | `prompt` (required), `model`, `cwd`, `sandbox` |
 | `codex-reply` | Continue conversation | `threadId`, `prompt` |
 
-### 3. Calling Codex
+Use Codex MCP for interactive debugging sessions where multi-turn conversation is needed.
+For one-shot dispatches, use `codex exec` commands (see [Model Dispatch Reference](#model-dispatch-reference)).
 
-**For GPT-5.2 (planning/analysis):**
-```
-Use MCP tool "codex" with:
-- prompt: "Your task here"
-- model: "gpt-5.2"
-- cwd: "/path/to/project"
-```
+### Session Continuity
 
-**For GPT-5.2-Codex (implementation):**
-```
-Use MCP tool "codex" with:
-- prompt: "Implement X per TASK.md"
-- model: "gpt-5.2-codex"
-- sandbox: "workspace-write"
-- cwd: "/path/to/project"
+Use `--continue` flag with `claude` CLI for session persistence across cycle kicks:
+```bash
+claude --continue --print --dangerously-skip-permissions "DEADF_CYCLE $CYCLE_ID ..."
 ```
 
-### Model Assignments
+This allows STATE.yaml context to carry across cycles without full reload overhead.
 
-| Role | Model | How |
-|------|-------|-----|
-| Orchestrator | Claude (you) | Native |
-| Research | Claude + GPT-5.2 (parallel) | Native + MCP `codex` |
-| Planner | GPT-5.2 | MCP `codex` |
-| Checker | Claude | Native |
-| Executor | GPT-5.2-Codex | MCP `codex` |
-| Reflector | Claude + GPT-5.2 (parallel) | Native + MCP `codex` |
+### Tool Restrictions
+
+Use `--allowedTools` flag to restrict tool access for sub-agents when needed:
+```bash
+claude --allowedTools "Read,Write,exec" --print "sub-agent prompt..."
+```
 
 ---
 
-## Philosophy
+## Cycle Protocol
 
-- **Plan incrementally** - One track at a time, not all phases upfront
-- **Execute atomically** - One task, one commit, one verification
-- **Reflect on ALL outcomes** - Success, failure, AND escalation
-- **Evolve documentation** - Living docs updated after each success
+When you receive `DEADF_CYCLE <cycle_id>`, execute these 6 steps in order:
 
-## Commands
+### Step 1: LOAD
 
-### `/deadf:init <name>`
-Initialize a new project with deadf(ish) structure.
-
-**Preflight Detection** — Auto-detect scenario before proceeding:
-- **Greenfield** (no docs, no code) → Brainstorm flow (existing)
-- **Brownfield** (no docs, has code) → Interactive mapping → seamless brainstorm transition
-- **Returning** (has docs: VISION.md etc.) → Restart / Refine / Continue
-
-Heuristics (brownfield = 2+ signals): `.git/` exists, source files present, `package.json`/`go.mod`/etc., CI config, README.
-
-Creates (all scenarios converge to):
+Read these files (fail if any missing/unparseable):
 ```
-<name>/
-├── VISION.md
-├── PRODUCT.md
-├── TECH_STACK.md
-├── WORKFLOW.md
-├── PATTERNS.md
-├── PITFALLS.md
-├── RISKS.md
-├── GLOSSARY.md
-├── ROADMAP.md
-├── STATE.md
-├── tracks.md
-└── tracks/
+STATE.yaml          — current pipeline state
+POLICY.yaml         — mode behavior, thresholds
+task.files_to_load  — files listed in STATE task.files_to_load (cap: <3000 tokens total)
 ```
 
-#### Greenfield Flow
-No code detected → proceed directly to `/deadf:brainstorm`.
+### Step 2: VALIDATE
 
-#### Brownfield Flow
-Code detected, no living docs → interactive mapping:
-
-1. **Existing doc intake**: Read README, CONTRIBUTING, etc. Distill as *hints* — question, don't trust. Present summary: "Here's what I found. Correct me."
-2. **Dynamic analysis depth**: Orchestrator decides 1–4 analysis passes based on codebase complexity:
-   - Pass 1: General structure (entry points, framework, deps) — always
-   - Pass 2: Architecture patterns (routing, data layer, auth) — medium+ projects
-   - Pass 3: Testing/CI/deployment — if CI config exists
-   - Pass 4: Domain model deep-dive — large/complex codebases
-3. **Git history signals**: `git log --stat` for hot files (recent churn) vs stale files. Weight confidence by activity.
-4. **Structured per-category confirmation**: Present findings category by category (stack, patterns, risks, etc.). User confirms/corrects each before proceeding.
-5. **Seamless transition**: After mapping, ask "What do you want to work on?" — flows into brainstorm for VISION completion or directly to `/deadf:track` if vision is clear.
-
-#### Returning Flow
-Living docs detected (VISION.md exists) → offer:
-- **Restart**: Wipe docs, start fresh
-- **Refine**: Update specific docs (e.g., stack changed, new patterns)
-- **Continue**: Load STATE.md, resume where left off
-
-#### Agent Failure Handling
-If any analysis pass fails or produces low-confidence results:
-- Show partial results with confidence markers
-- Offer retry for failed category
-- Fallback: skip to interactive brainstorm (user provides info manually)
-- Never block the pipeline on a failed mapper
-
-### `/deadf:brainstorm`
-Interactive vision discovery session. Guides through:
-1. Problem → Who feels it → Consequences
-2. Users → Needs → Journey
-3. Solution → Mechanism → Differentiator
-4. Success metrics
-5. MVP scope (in/out/never)
-
-Output: Completed VISION.md
-
-### `/deadf:research`
-Research phase for current project.
-
-**Parallel Research** (with Codex MCP):
-1. You (Claude) research via web search
-2. Simultaneously call GPT-5.2 via MCP tool `codex`:
-   ```json
-   {
-     "prompt": "Research best practices for [project type]: stack options, patterns, common pitfalls, potential risks. Output structured findings.",
-     "model": "gpt-5.2",
-     "cwd": "/path/to/project"
-   }
+1. Parse STATE.yaml. If unparseable or schema mismatch → `phase: needs_human`, reply `CYCLE_FAIL`.
+2. Check `cycle.status` is NOT `running`. If running → reply `CYCLE_FAIL` (another cycle in progress).
+3. Derive nonce from cycle_id:
+   - If cycle_id is hex: `cycle_id[:6].upper()`
+   - Otherwise: `sha256(cycle_id.encode('utf-8')).hexdigest()[:6].upper()`
+   - Nonce format: exactly `^[0-9A-F]{6}$`
+4. Write to STATE.yaml:
+   ```yaml
+   cycle.id: <cycle_id>
+   cycle.nonce: <derived_nonce>
+   cycle.status: running
+   cycle.started_at: <ISO-8601 timestamp>
    ```
-3. Merge findings, note disagreements in disagreement register
+5. Check budgets:
+   - Time: if `now() - budget.started_at >= max_hours` → `phase: needs_human`, reply `CYCLE_FAIL`
+   - Iterations: checked by ralph.sh (not your concern)
+   - Budget 75% warning: if `now() - budget.started_at >= 0.75 * max_hours` → notify Fred per POLICY
 
-**Steps:**
-1. Parallel research (Claude + GPT-5.2)
-2. Document findings
-3. Create disagreement register if sources conflict
-4. Seed living docs (TECH_STACK, PATTERNS, PITFALLS, RISKS)
+### Step 3: DECIDE
 
-### `/deadf:track <name>`
-Start a new track (feature/fix):
-1. Create `tracks/<id>/spec.md` from VISION + living docs
-2. Get approval on spec
-3. Create `tracks/<id>/plan.md` with task breakdown
-4. Get approval on plan
-5. Update STATE.md with active track
+Read `phase` and `task.sub_step` from STATE.yaml. The action is deterministic:
 
-### `/deadf:task`
-Generate next TASK.md from current track's plan.
+| Phase | Condition | Action |
+|-------|-----------|--------|
+| `research` | — | `seed_docs` |
+| `select-track` | No track selected | `pick_track` |
+| `select-track` | Track selected, no spec | `create_spec` |
+| `select-track` | Spec exists, no plan | `create_plan` |
+| `execute` | `sub_step: null` or `generate` | `generate_task` |
+| `execute` | `sub_step: implement` | `implement_task` |
+| `execute` | `sub_step: verify` | `verify_task` |
+| `execute` | `sub_step: reflect` | `reflect` |
+| `execute` | `sub_step: implement` + `last_result.ok == false` + `retry_count < max_retries` | `retry_task` |
+| `execute` | `sub_step: implement` + `last_result.ok == false` + `retry_count >= max_retries` | `rollback_and_escalate` |
+| `complete` | — | `summarize` |
+| Any | Budget exceeded, stuck, state invalid | `escalate` |
 
-Task includes:
-- Context (track, spec, plan refs)
-- Files to create/modify
-- Action (implementation instructions)
-- Verify (executable test steps)
-- Done (acceptance criteria)
-- Rollback (how to undo)
+**One cycle = one action. No chaining.**
 
-### `/deadf:execute`
-Execute the current TASK.md:
-1. Call GPT-5.2-Codex via MCP tool `codex`:
-   ```json
-   {
-     "prompt": "Read TASK.md and implement the task. Follow PATTERNS.md for architecture and WORKFLOW.md for process. Commit when done.",
-     "model": "gpt-5.2-codex",
-     "sandbox": "workspace-write",
-     "cwd": "/path/to/project"
-   }
-   ```
-2. Run verification steps from TASK.md
-3. If pass → commit with proper format
-4. If fail → debug and retry
+### Step 4: EXECUTE
 
-### `/deadf:verify`
-Verify current task against:
-- WORKFLOW.md (definition of done)
-- PATTERNS.md (architecture expectations)
-- Track spec (acceptance criteria)
-- Source fidelity (if using existing data)
+Run the determined action. See [Action Specifications](#action-specifications) below.
 
-### `/deadf:reflect`
-Post-task reflection. Run after EVERY outcome.
+### Step 5: RECORD
 
-**Parallel Analysis** (with Codex MCP):
-1. You (Claude) analyze the outcome
-2. Simultaneously call GPT-5.2 via MCP tool `codex`:
-   ```json
-   {
-     "prompt": "Analyze this task outcome: [success/failure/escalation]. Review what happened. What patterns should be documented? What pitfalls discovered? Any systemic risks? Output as diff proposals for PATTERNS.md, PITFALLS.md, or RISKS.md.",
-     "model": "gpt-5.2",
-     "cwd": "/path/to/project"
-   }
-   ```
-3. Merge both analyses into unified diff proposals
+Update STATE.yaml atomically (write to temp file, then rename):
+- `cycle.status`: `complete` (action succeeded) or `failed` (action failed)
+- `cycle.finished_at`: ISO-8601 timestamp
+- `loop.iteration`: **always increment** (even on failure)
+- `last_action`: the action name
+- `last_result`: outcome details
+- Action-specific fields (see each action spec)
 
-**On success:**
-- Did we use a new approach? → Log as experimental pattern
-- Validate experimental pattern twice? → Promote to PATTERNS.md
+**Baseline update rules:**
+- `last_good.commit`, `last_good.task_id`, `last_good.timestamp` → update ONLY after verify PASS + reflect complete
+- `last_cycle.commit_hash`, `last_cycle.test_count`, `last_cycle.diff_lines` → update after verify PASS (before reflect)
+- `loop.stuck_count` → reset to 0 on PASS, +1 on no-progress
+- `task.retry_count` → reset to 0 on PASS, +1 on FAIL
 
-**On failure:**
-- What was root cause?
-- One-off mistake → Add to PITFALLS.md
-- Systemic issue → Add to RISKS.md
+**No-progress definition:** same `commit_hash` AND same `test_count` after a full execute attempt.
 
-**On escalation:**
-- Why couldn't this resolve?
-- Missing contract clause → Propose addition
-- Ambiguous clause → Propose clarification
+### Step 6: REPLY
 
-Output: Diff proposals (not prose) for living doc updates.
+Print to stdout exactly one of (must be the **LAST LINE** of output):
+- `CYCLE_OK` — action completed successfully
+- `CYCLE_FAIL` — action failed (will retry or escalate)
+- `DONE` — project complete (`phase: complete`)
 
-### `/deadf:status`
-Show current position:
-- Active track and task
-- Progress (tasks done / total)
-- Blockers
-- Next recommended action
-
-### `/deadf:next`
-Shortcut: task → execute → verify → reflect in one flow.
+**ralph.sh scans stdout for these tokens.** They must appear as the final line.
 
 ---
 
-## Context Budget
+## Action Specifications
 
-ALL living docs combined MUST stay under **5000 tokens**. Machine-optimized YAML format, not prose.
+### `seed_docs` (research phase)
 
-### Token Targets
+1. Read project files, understand codebase structure
+2. Generate initial documentation (VISION.md, ROADMAP.md if not present)
+3. Set `phase: select-track`
 
-| Doc | Budget |
-|-----|--------|
-| VISION.md | 300t |
-| ROADMAP.md | 500t |
-| STATE.md | 200t |
-| TECH_STACK.md | 400t |
-| PATTERNS.md | 400t |
-| PITFALLS.md | 300t |
-| RISKS.md | 300t |
-| WORKFLOW.md | 400t |
-| PRODUCT.md | 400t |
-| GLOSSARY.md | 200t |
+### `pick_track` (select-track phase)
 
-### Smart Loading (per track type)
+1. Consult GPT-5.2 planner to select next track from `tracks_remaining`
+2. Set `track.id`, `track.name`, `track.status: in-progress`
+3. Advance sub-step
 
-Only load docs relevant to the current track (~1500–2000t per session):
+### `create_spec` / `create_plan` (select-track phase)
 
-| Track Type | Load |
-|------------|------|
-| UI/frontend | VISION, PATTERNS, WORKFLOW |
-| API/backend | VISION, PATTERNS, TECH_STACK |
-| Database | VISION, TECH_STACK, PRODUCT |
-| Auth/security | VISION, PATTERNS, RISKS |
-| Refactor | VISION, PITFALLS, PATTERNS |
-| Ambiguous | VISION, PATTERNS, RISKS, PITFALLS |
+1. Consult GPT-5.2 planner for track spec/plan
+2. Parse output with `extract_plan.py --nonce <nonce>` (see [Sentinel Parsing](#sentinel-parsing))
+3. Update track details
+4. On plan complete: set `phase: execute`, `task.sub_step: generate`
 
-### Compression Principle
+### `generate_task` (execute phase)
 
-If a doc exceeds its budget: compress, don't split. Remove examples, collapse tables, use YAML shorthand. Split into a separate file only when a section exceeds 500t on its own.
+1. Consult GPT-5.2 planner for next task specification
+2. Prompt includes the sentinel block template with current nonce
+3. Parse output with `extract_plan.py --nonce <nonce>`
+4. On parse success: write TASK.md from parsed plan, update STATE:
+   ```yaml
+   task.id: <from plan>
+   task.description: <from plan>
+   task.sub_step: implement
+   task.files_to_load: <from plan FILES>
+   ```
+5. On parse failure after retry: `CYCLE_FAIL`
 
----
+### `implement_task` (execute phase)
 
-## Document Hierarchy
+1. Dispatch to gpt-5.2-codex:
+   ```bash
+   codex exec -m gpt-5.2-codex -c 'model_reasoning_effort="high"' --approval-mode full-auto "<implementation prompt>"
+   ```
+2. Read results from git (deterministic, no LLM parsing):
+   ```
+   commit_hash   = git rev-parse HEAD
+   exit_code     = codex return code
+   files_changed = git diff HEAD~1 --name-only   # if HEAD~1 exists
+   diff_lines    = git diff HEAD~1 --stat         # if HEAD~1 exists
+   ```
+   Edge case: if this is the first commit (no HEAD~1), use `git diff --cached` or `git show --stat HEAD` instead.
+3. On success (exit 0 + new commit exists): set `task.sub_step: verify`
+4. On failure (nonzero exit or no new commit): set `last_result.ok: false`, `CYCLE_FAIL`
 
-| Layer | Documents | Updates |
-|-------|-----------|---------|
-| **Constitution** | VISION.md | Only via explicit pivot |
-| **Living Docs** | PRODUCT, TECH_STACK, WORKFLOW, PATTERNS, PITFALLS, RISKS, GLOSSARY | After successful tasks |
-| **Execution** | STATE.md, TASK.md, ROADMAP.md | Continuously |
-| **Tracks** | tracks/<id>/spec.md, plan.md, log.md | Per track |
+### `verify_task` (execute phase)
 
-## Validation Rules
+Three-stage verification:
 
-### 3-Try Rule
-All validation: max 3 iterations, then escalate to user.
-
-### Clarification Step
-Before iterating, can ask for clarification (doesn't count toward 3 tries).
-
-### Contract Citation
-When rejecting/disputing, cite specific clause:
-- `VISION.V1`, `WORKFLOW.W3`, `PATTERNS.P2`, `SPEC.S1`, etc.
-- No citation = discretionary = default to original proposal
-
-## Commit Format
-
+**Stage 1: Deterministic verification**
+```bash
+./verify.sh
 ```
-{type}({scope}): {description}
+Output: JSON with `pass`, `checks`, `failures` fields.
 
-{body - reference task ID}
+If verify.sh JSON is invalid → `CYCLE_FAIL` (script bug, needs fix).
+If `verify.sh.pass == false` → FAIL immediately. Do NOT run LLM verifier.
+
+**Stage 2: LLM verification (only if verify.sh passes)**
+
+For each acceptance criterion in the plan:
+1. Spawn sub-agent via the **Task tool** with per-criterion prompt
+2. Include: diff summary, test results, verify.sh JSON
+3. Each sub-agent produces one verdict block
+4. Collect all raw responses
+
+**Sub-agent dispatch (Task tool):**
+```
+Use the Task tool to spawn a sub-agent:
+- Instructions: per-criterion verification prompt with sentinel template
+- Each sub-agent runs in an isolated context
+- Up to 7 parallel sub-agents supported
+- Sub-agents return results when complete
 ```
 
-Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`
+**Stage 3: Build combined verdict**
+```bash
+echo '<raw_responses_json>' | python3 build_verdict.py --nonce <nonce> --criteria AC1,AC2,...
+```
 
-## Key Principles
+**Combined verdict logic:**
+| verify.sh | LLM Verifier | Result |
+|-----------|-------------|--------|
+| FAIL | (not run) | **FAIL** |
+| PASS | FAIL | **FAIL** (conservative) |
+| PASS | NEEDS_HUMAN | **pause for Fred** (mode-dependent) |
+| PASS | PASS | **PASS** |
+| PASS | parse failure after retry | **NEEDS_HUMAN** |
+| JSON invalid | (n/a) | **CYCLE_FAIL** |
 
-1. **Don't skip steps** - Each phase exists for a reason
-2. **Reflect on failures** - Most learning comes from what went wrong
-3. **Diffs not prose** - Doc updates as concrete patches
-4. **Cite contracts** - Disputes reference specific clauses
-5. **One task, one commit** - Atomic, traceable changes
+On PASS: set `task.sub_step: reflect`, update `last_cycle.*`, set `last_result.ok: true`
+On FAIL: increment `task.retry_count`, set `task.sub_step: implement`, set `last_result.ok: false`
+  (Next cycle's DECIDE will read retry_count to choose `retry_task` vs `rollback_and_escalate`)
+On NEEDS_HUMAN: set `phase: needs_human` (all modes)
+
+### `reflect` (execute phase)
+
+1. Update documentation if needed
+2. Update baselines:
+   ```yaml
+   last_good.commit: <current HEAD>
+   last_good.task_id: <current task.id>
+   last_good.timestamp: <now>
+   ```
+3. Advance to next task or track:
+   - If more tasks in track: `task.sub_step: generate`, increment `task_current`
+   - If track complete: `track.status: complete`, move to `tracks_completed`, set `phase: select-track`
+   - If all tracks done: `phase: complete`
+4. Reset: `task.retry_count: 0`, `loop.stuck_count: 0`
+
+### `retry_task` (execute phase)
+
+1. Increment `task.retry_count`
+2. Set `task.sub_step: implement` (re-enter implementation)
+3. Include failure context in next implementation prompt
+
+### `rollback_and_escalate` (execute phase)
+
+Triggered when `task.retry_count >= task.max_retries` (default: 3).
+
+**You (Claude Code) run the rollback commands. Not ralph. Not the implementer.**
+
+```bash
+# 1. Handle dirty tree
+git stash  # only if dirty
+
+# 2. Preserve failed work
+git checkout -b rescue-{_run_id}-{task.id}
+# If branch exists: append -2, -3, etc.
+
+# 3. Rollback
+git checkout main
+git reset --hard {last_good.commit}
+# If no commits yet: skip rollback, just escalate
+```
+
+Update STATE:
+```yaml
+task.retry_count: 0
+last_result.ok: false
+last_result.details: "Rolled back after 3x failure. Rescue: rescue-{_run_id}-{task.id}"
+phase: needs_human
+```
+
+### `summarize` (complete phase)
+
+1. Generate completion summary
+2. Notify Fred (all modes) — write summary to stdout and `.deadf/notifications/complete.md`
+3. Reply `DONE`
+
+### `escalate` (any phase)
+
+1. Set `phase: needs_human`
+2. Notify Fred with context (what went wrong, what was tried) — write to stdout and `.deadf/notifications/escalation.md`
+3. Reply `CYCLE_FAIL`
 
 ---
 
-*deadf(ish) - GSD + Conductor hybrid pipeline*
-*"Plan incrementally, execute atomically, reflect always"*
+## Sentinel Parsing
+
+### Nonce Lifecycle
+
+| Event | Nonce Behavior |
+|-------|---------------|
+| Cycle start | Derive from cycle_id, store in `cycle.nonce` |
+| Planner call | Inject into prompt template |
+| Format-repair retry | **Same nonce** (same cycle) |
+| All verifier calls | **Same nonce** (all criteria, same cycle) |
+| New cycle | **New nonce** (new cycle_id) |
+
+### Plan Block Format
+
+```
+<<<PLAN:V1:NONCE={nonce}>>>
+TASK_ID=<bare>
+TITLE="<quoted>"
+SUMMARY=
+  <2-space indented multi-line>
+FILES:
+- path=<bare> action=<add|modify|delete> rationale="<quoted>"
+ACCEPTANCE:
+- id=AC<n> text="<quoted testable statement>"
+ESTIMATED_DIFF=<positive integer>
+<<<END_PLAN:NONCE={nonce}>>>
+```
+
+Parse with: `python3 extract_plan.py --nonce <nonce> < raw_output`
+
+### Verdict Block Format
+
+```
+<<<VERDICT:V1:{criterion_id}:NONCE={nonce}>>>
+ANSWER=YES or NO
+REASON="<single sentence>"
+<<<END_VERDICT:{criterion_id}:NONCE={nonce}>>>
+```
+
+Parse with: `python3 build_verdict.py --nonce <nonce> --criteria AC1,AC2,...`
+
+### Format-Repair Retry
+
+If `extract_plan.py` or `build_verdict.py` exits 1:
+1. Read stderr (contains specific error with line number)
+2. Send to same LLM: *"Your output could not be parsed. Error: {stderr}. Please output ONLY the corrected block, no other text."*
+3. Parse again (**same nonce**)
+4. If still fails: `CYCLE_FAIL` (planner) or `NEEDS_HUMAN` (verifier)
+
+**One retry maximum.**
+
+---
+
+## Stuck Detection
+
+| Trigger | Condition | Action |
+|---------|-----------|--------|
+| Stuck | `stuck_count >= stuck_threshold` (default: 3) | `phase: needs_human`, notify Fred |
+| Budget time | `now() - budget.started_at >= max_hours` | `phase: needs_human`, notify Fred |
+| 3x task failure | `task.retry_count >= max_retries` | Rollback + `phase: needs_human` |
+| State invalid | STATE.yaml unparseable or schema mismatch | `phase: needs_human`, `CYCLE_FAIL` |
+| Parse failure | Actor output invalid after 1 retry | `CYCLE_FAIL` |
+
+---
+
+## Notifications (Mode-Dependent)
+
+Read mode from `STATE.yaml → mode`. Read behavior from `POLICY.yaml → modes.<mode>.notifications`.
+
+Notifications are delivered via **stdout** (for ralph.sh to capture) and **files** in `.deadf/notifications/`:
+
+| Event | yolo | hybrid | interactive |
+|-------|------|--------|-------------|
+| Track complete | silent | 🔔 notify | 🔔 notify |
+| New track starting | silent | 🔔 ask approval | 🔔 ask approval |
+| Task complete | silent | silent | 🔔 ask approval |
+| Stuck | 🔔 pause | 🔔 pause | 🔔 pause |
+| 3x fail + rollback | 🔔 pause | 🔔 pause | 🔔 pause |
+| Budget 75% | 🔔 warn | 🔔 warn | 🔔 warn |
+| Complete | 🎉 summary | 🎉 summary | 🎉 summary |
+
+**"pause" = set `phase: needs_human` and write notification to `.deadf/notifications/` + stdout.**
+**"ask approval" = write notification and wait for response before proceeding.**
+**"notify" = write notification to `.deadf/notifications/{event}-{timestamp}.md` + print to stdout.**
+
+### Notification File Format
+
+```
+.deadf/notifications/
+├── track-complete-2026-01-29T04:30:00Z.md
+├── escalation-2026-01-29T05:00:00Z.md
+├── budget-warn-2026-01-29T06:00:00Z.md
+└── complete.md
+```
+
+Each file contains: event type, timestamp, context, and any required human action.
+
+---
+
+## State Write Authority
+
+| Actor | What It Can Write |
+|-------|------------------|
+| **ralph.sh** | `phase` → `needs_human` ONLY; `cycle.status` → `timed_out` ONLY |
+| **Claude Code** | Everything else in STATE.yaml |
+| **All others** | Nothing (stdout only) |
+
+**Atomic writes:** Always write to a temp file, then `mv` to STATE.yaml. Never partial writes.
+
+---
+
+## Model Dispatch Reference
+
+| Purpose | Command | Model |
+|---------|---------|-------|
+| Planning | `codex exec -m gpt-5.2 --skip-git-repo-check "<prompt>"` | GPT-5.2 |
+| Implementation | `codex exec -m gpt-5.2-codex -c 'model_reasoning_effort="high"' --approval-mode full-auto "<prompt>"` | GPT-5.2-Codex |
+| LLM Verification | Task tool (sub-agent) | Claude Opus 4.5 (native) |
+| Interactive Debug | Codex MCP tool (`codex` / `codex-reply`) | GPT-5.2 or GPT-5.2-Codex |
+| QA Review | `codex exec -m gpt-5.2 --skip-git-repo-check "<prompt>"` | GPT-5.2 |
+| Orchestration | You (this session) | Claude Opus 4.5 |
+
+### When to Use MCP vs codex exec
+
+| Scenario | Use | Why |
+|----------|-----|-----|
+| One-shot planning | `codex exec` | Fire-and-forget, clean stdout |
+| One-shot implementation | `codex exec` | Full-auto, commits directly |
+| Multi-turn debugging | Codex MCP (`codex` + `codex-reply`) | Needs conversation context |
+| Interactive exploration | Codex MCP | Back-and-forth with model |
+
+---
+
+## Safety Constraints
+
+1. **Never write source code.** Delegate to gpt-5.2-codex.
+2. **Never override verifier verdicts.** If verify.sh says FAIL, it's FAIL. Period.
+3. **Deterministic wins.** verify.sh results always take precedence over LLM judgment.
+4. **Conservative by default.** verify.sh PASS + LLM FAIL = FAIL.
+5. **One cycle = one action.** Never chain multiple actions in a single cycle.
+6. **Atomic state updates.** Temp file + rename. Never partial writes to STATE.yaml.
+7. **Nonce integrity.** Every sentinel parse must use the cycle's nonce. Never reuse across cycles.
+8. **Rollback authority is yours.** You run git rollback commands. Not ralph. Not the implementer.
+9. **No secrets in files.** Ever.
+10. **Escalate when uncertain.** `phase: needs_human` is always safe.
+
+---
+
+## Quick Reference: Cycle Flow
+
+```
+DEADF_CYCLE <cycle_id>
+  │
+  ├─ LOAD:     Read STATE.yaml + POLICY.yaml + task files
+  ├─ VALIDATE: Parse state, derive nonce, set cycle.status=running, check budgets
+  ├─ DECIDE:   phase + sub_step → exactly one action
+  ├─ EXECUTE:  Run the action (dispatch to appropriate worker)
+  ├─ RECORD:   Update STATE.yaml (always increment iteration)
+  └─ REPLY:    CYCLE_OK | CYCLE_FAIL | DONE  (printed to stdout, last line)
+```
+
+---
+
+## The Ralph Loop (CLI Adaptation)
+
+ralph.sh calls Claude Code CLI instead of Clawdbot sessions:
+
+```bash
+# Core cycle kick (replaces clawdbot session send):
+claude --print --dangerously-skip-permissions "DEADF_CYCLE $CYCLE_ID
+project: $PROJECT_PATH
+mode: $MODE
+Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DONE"
+```
+
+**Key differences from pipeline version:**
+- `claude --print` outputs to stdout (ralph.sh captures and scans for cycle tokens)
+- `--dangerously-skip-permissions` enables full filesystem and exec access
+- `--continue` can be added for session persistence across cycles
+- No Discord dependency — all communication via stdout and filesystem
+
+### ralph.sh Token Scanning
+
+ralph.sh scans Claude Code's stdout for the cycle reply token:
+```bash
+# After claude --print completes:
+LAST_LINE=$(tail -1 "$OUTPUT_FILE")
+case "$LAST_LINE" in
+  *CYCLE_OK*)   echo "[ralph] Cycle OK" ;;
+  *CYCLE_FAIL*) echo "[ralph] Cycle failed" ;;
+  *DONE*)       echo "[ralph] Pipeline complete" ;;
+  *)            echo "[ralph] No valid reply — treating as fail" ;;
+esac
+```
+
+---
+
+## Sub-Agent Dispatch (Task Tool)
+
+Claude Code uses its native **Task tool** for sub-agent spawning (replaces `sessions_spawn`):
+
+### Usage Pattern
+
+```
+Use the Task tool:
+- Instructions: "Verify acceptance criterion AC1 against the following context..."
+- Each Task runs in an isolated context
+- Up to 7 parallel Tasks supported
+- Results returned when sub-agent completes
+```
+
+### When to Use Sub-Agents
+
+| Scenario | Sub-Agent? | Why |
+|----------|-----------|-----|
+| Per-criterion LLM verification | ✅ Yes | One Task per AC, parallelizable |
+| Deep code analysis | ✅ Yes | Isolated context, focused task |
+| Quick state check | ❌ No | Overhead exceeds benefit |
+| Implementation dispatch | ❌ No | Use `codex exec` instead |
+
+### Sub-Agent Output Contract
+
+Each verification sub-agent MUST return:
+1. The sentinel verdict block (for `build_verdict.py` parsing)
+2. Raw reasoning (ignored by parser, but preserved in logs)
+
+---
+
+*Contract version: 2.4.2 — Adapted for Claude Code CLI. Matches FINAL_ARCHITECTURE_v2.4.2.md.* 🐟
