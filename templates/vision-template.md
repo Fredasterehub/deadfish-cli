@@ -1,79 +1,42 @@
 # Vision Template
 
-Constitution document. Static after approval. Changes only via Pivot Record.
+Constitution. Static after approval. Changes only via Pivot Record. Budget: 300 tokens.
 
----
-
-```markdown
----
+```yaml
+# VISION.md
 status: draft | approved
-approved: {ISO date}
+approved: {date}
 approved_by: {name}
----
 
-# Vision: {project-name}
+# V1: Problem
+pain: {what problem exists}
+who: {primary persona}
+stakes: {consequences if unsolved}
 
-## V1: Problem Statement
+# V2: Users
+primary:
+  persona: {name, role, context}
+  needs: [{need1}, {need2}]
 
-### The Pain
-{What problem exists? Be specific.}
+# V3: Solution
+what: {one-line description}
+mechanism: {how it works}
+differentiator: {key insight}
 
-### Who Feels It
-{Primary user/persona. One sentence.}
+# V4: Metrics
+must_have: [{metric1}, {metric2}]
+should_have: [{metric3}]
 
-### Consequences
-{What happens if unsolved? Stakes.}
+# V5: MVP Scope
+in: [{feature1}, {feature2}]
+out: [{deferred1}]
+never: [{exclusion1}]
 
-## V2: Target Users
-
-### Primary Persona
-{Name, role, context, goals, frustrations}
-
-### What They Need
-{Bullet list of needs this project addresses}
-
-## V3: Proposed Solution
-
-### What We're Building
-{One paragraph description}
-
-### Core Mechanism
-{How it works at a high level}
-
-### Why This Approach
-{Key insight or differentiator}
-
-## V4: Success Metrics
-
-### Must Have (MVP)
-- [ ] {Metric 1 - measurable}
-- [ ] {Metric 2 - measurable}
-
-### Should Have (v1.1)
-- [ ] {Metric 3}
-
-## V5: MVP Scope
-
-### In Scope
-- {Feature 1}
-- {Feature 2}
-- {Feature 3}
-
-### Out of Scope (v1)
-- {Deferred 1}
-- {Deferred 2}
-
-### Non-Goals (Never)
-- {Explicit exclusion 1}
-- {Explicit exclusion 2}
-
----
-*Clause IDs: V1-V5. Reference as VISION.V1, VISION.V2, etc.*
+# Clause IDs: VISION.V1–V5
 ```
 
-## Usage Notes
-
-- Each section has a clause ID (V1-V5) for contract citation
-- "approved" status means no changes without Pivot Record
-- Non-Goals are permanent exclusions, not deferrals
-- Success metrics must be measurable (numbers, not vibes)
+## Notes
+- Each section = citable clause (V1–V5)
+- "approved" = no changes without Pivot Record
+- "never" = permanent exclusions, not deferrals
+- Metrics must be measurable

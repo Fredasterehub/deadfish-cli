@@ -1,68 +1,37 @@
 # State Template
 
-Current position document. What's happening NOW.
+Current position. Budget: 200 tokens.
 
----
+```yaml
+# STATE.md
+# Last updated: {timestamp}
 
-```markdown
-# State: {project-name}
+position:
+  track: {track-id} — {name}
+  task: {task-id} — {name}
+  status: planned|executing|verifying|blocked
 
-*Last updated: {ISO timestamp}*
+stats:
+  tracks: {done}/{total}
+  tasks: {done}/{total}
+  blockers: {count}
 
-## Current Position
+blockers:                          # omit if none
+  - what: {description}
+    since: {date}
+    waiting: {unblocks}
 
-- **Active Track**: {track-id} - {track name}
-- **Current Task**: {task-id} - {task name}
-- **Status**: planned | executing | verifying | blocked
+recent:
+  - date: {date}
+    what: {task/decision}
+    result: pass|fail|paused
 
-## Quick Stats
+next:
+  - {immediate step}
+  - {following step}
 
-| Metric | Value |
-|--------|-------|
-| Tracks complete | {n}/{total} |
-| Current track tasks | {n}/{total} |
-| Blockers | {count} |
+notes: |
+  {context for resuming}
 
-## Blockers
-
-<!-- Empty if none -->
-| Blocker | Since | Waiting On |
-|---------|-------|------------|
-| {description} | {date} | {what unblocks} |
-
-## Recent Activity
-
-| Date | What | Outcome |
-|------|------|---------|
-| {date} | {task/decision} | ✅/❌/⏸️ |
-
-## Next Actions
-
-1. {Immediate next step}
-2. {Following step}
-
-## Notes
-
-{Any context needed for resuming work}
-
----
-*Updated automatically by pipeline. Manual edits preserved in Notes section.*
+# Auto-updated by pipeline. Manual edits in notes only.
 ```
-
-## Update Triggers
-
-STATE.md is updated:
-- When starting a new task
-- When task status changes
-- When blockers arise or resolve
-- At end of work session
-
-## Relationship to Other Docs
-
-| Doc | STATE.md reads | STATE.md writes |
-|-----|----------------|-----------------|
-| tracks.md | Active track | Track status |
-| TASK.md | Current task | Task status |
-| ROADMAP.md | — | — |
-
-STATE.md is the "now" pointer. Everything else is "what" and "how".

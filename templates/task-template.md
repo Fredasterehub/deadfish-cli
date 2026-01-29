@@ -1,50 +1,39 @@
 # Task Template
 
-Copy and fill for new tasks.
+Copy and fill. All fields required unless noted optional.
 
 ```xml
-<task id="">
-  <name></name>
-  
+<task id="{track-id}.{number}">
+  <name>{brief name}</name>
   <context>
-    <track></track>
-    <spec_ref></spec_ref>
-    <plan_ref></plan_ref>
+    <track>{track-id}</track>
+    <spec_ref>{path}</spec_ref>
+    <plan_ref>{path}</plan_ref>
   </context>
-  
   <files>
-    <file action="create"></file>
+    <file action="create|modify|delete">{path}</file>
   </files>
-  
-  <action>
-  </action>
-  
-  <source_refs>
-    <!-- Remove if not using existing data -->
-    <ref type=""></ref>
+  <action>{specific implementation instructions}</action>
+  <source_refs><!-- optional: only if using existing data -->
+    <ref type="url|file|doc">{reference}</ref>
   </source_refs>
-  
-  <assumptions>
-    <assumption></assumption>
+  <assumptions><!-- optional -->
+    <assumption>{assumption}</assumption>
   </assumptions>
-  
-  <non_goals>
-    <non_goal></non_goal>
+  <non_goals><!-- optional -->
+    <non_goal>{exclusion}</non_goal>
   </non_goals>
-  
   <verify>
     <step>
-      <command></command>
-      <expected></expected>
+      <command>{executable command}</command>
+      <expected>{expected result}</expected>
     </step>
   </verify>
-  
   <done>
-    <criterion contract=""></criterion>
+    <criterion contract="{clause-id}">{pass/fail criterion}</criterion>
   </done>
-  
   <rollback>
-    <step></step>
+    <step>{undo instruction}</step>
   </rollback>
 </task>
 ```

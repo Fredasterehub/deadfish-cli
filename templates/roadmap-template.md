@@ -1,68 +1,35 @@
 # Roadmap Template
 
-Thin document. Themes and next tracks only. NOT detailed phases.
+Thin document. Themes + next tracks only. Budget: 500 tokens.
 
----
+```yaml
+# ROADMAP.md
+# Last updated: {date}
 
-```markdown
-# Roadmap: {project-name}
+theme: {current focus — one sentence}
 
-*Last updated: {ISO date}*
+active:
+  - id: {track-id}
+    name: {name}
+    status: active|planned|paused
+    target: {date or TBD}
 
-## Current Theme
+next:                              # 2-4 tracks
+  - id: {track-id}
+    name: {name}
+    why_now: {sequencing rationale}
+    depends: [{prerequisites}]
+    unknowns: [{what to learn first}]
 
-**{Theme Name}**: {One sentence description of current focus}
+future_themes:
+  - {theme}: {brief description}
 
-## Active Tracks
+sequencing: {why ordered this way}
 
-| ID | Track | Status | Target |
-|----|-------|--------|--------|
-| {id} | {name} | 🟢 Active / 🟡 Planned / ⏸️ Paused | {date or "TBD"} |
+unknowns:
+  - what: {unknown}
+    blocks: [{track-ids}]
+    resolution: {how we'll learn}
 
-## Next Up (2-4 tracks)
-
-### {Track ID}: {Track Name}
-**Why now**: {Sequencing rationale}
-**Depends on**: {Prerequisites}
-**Unknowns**: {What must be learned first}
-
-### {Track ID}: {Track Name}
-**Why now**: {Sequencing rationale}
-**Depends on**: {Prerequisites}
-**Unknowns**: {What must be learned first}
-
-## Future Themes (not yet planned)
-
-- **{Theme 1}**: {Brief description}
-- **{Theme 2}**: {Brief description}
-
-## Sequencing Rationale
-
-{Why tracks are ordered this way. Dependencies, learning priorities, etc.}
-
-## Key Unknowns
-
-| Unknown | Blocking | Resolution Plan |
-|---------|----------|-----------------|
-| {unknown 1} | {which tracks} | {how we'll learn} |
-
----
-*Detailed planning lives in tracks/<id>/spec.md and plan.md*
-*This doc is intentionally thin*
+# Detail lives in tracks/<id>/spec.md + plan.md. This doc stays thin (~50 lines).
 ```
-
-## What Goes Here vs Tracks
-
-| ROADMAP.md | tracks/<id>/* |
-|------------|---------------|
-| Themes | Full specification |
-| Track list + status | Detailed plan |
-| Sequencing rationale | Task breakdown |
-| Key unknowns | Acceptance criteria |
-| ~50 lines | As detailed as needed |
-
-## Update Cadence
-
-- After each track completes: update status, add learnings to rationale
-- When priorities shift: reorder "Next Up"
-- When new theme emerges: add to "Future Themes"

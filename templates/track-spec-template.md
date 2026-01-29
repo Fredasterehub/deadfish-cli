@@ -1,86 +1,43 @@
 # Track Spec Template
 
-Specification for ONE track. Frozen when track completes.
+Frozen when track completes. Per-track file.
 
----
+```yaml
+# Spec: {Track ID} — {Track Name}
+status: draft|approved|in-progress|complete|superseded
+created: {date}
+approved: {date}
 
-```markdown
-# Spec: {Track ID} - {Track Name}
+summary: {one paragraph — what this delivers and why}
 
-*Status*: draft | approved | in-progress | complete | superseded
-*Created*: {date}
-*Approved*: {date}
+user_story:
+  as: {user type}
+  want: {action}
+  so_that: {benefit}
 
-## Summary
+acceptance:
+  S1: {criterion — specific, testable}
+  S2: {criterion}
+  S3: {criterion}
 
-{One paragraph: what this track delivers and why}
+non_goals:
+  - {explicitly excluded}
 
-## User Story
+approach:
+  overview: {high-level how}
+  decisions:
+    - choice: {what}
+      over: {alternatives}
+      why: {rationale}
+  depends: [{prerequisites}]
 
-As a {user type}
-I want to {action}
-So that {benefit}
+ux_notes: {considerations}
+deferred: [{future track items}]
+open_questions:                    # resolve before approval
+  - {question}
 
-## Acceptance Criteria
-
-### S1: {Criterion Name}
-{Specific, testable criterion}
-
-### S2: {Criterion Name}
-{Specific, testable criterion}
-
-### S3: {Criterion Name}
-{Specific, testable criterion}
-
-## Non-Goals
-
-- {What this track explicitly does NOT include}
-- {Prevents scope creep}
-
-## Technical Approach
-
-### Overview
-{High-level how}
-
-### Key Decisions
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| {decision} | {what we chose} | {why} |
-
-### Dependencies
-- {What must exist before this track}
-- {External services, APIs, etc.}
-
-## UX Notes
-
-{Any user experience considerations}
-
-## Out of Scope
-
-{What's deferred to future tracks}
-
-## Open Questions
-
-<!-- Resolve before approval -->
-- [ ] {Question 1}
-- [ ] {Question 2}
-
----
-*Clause IDs: S1, S2, S3. Reference as SPEC.S1, etc.*
-*This spec is frozen when track completes.*
+# Clause IDs: SPEC.S1, S2, etc. Frozen on completion.
 ```
 
 ## Lifecycle
-
-1. **Draft**: Being written, questions open
-2. **Approved**: Questions resolved, ready for planning
-3. **In-progress**: Has associated plan, tasks executing
-4. **Complete**: All acceptance criteria met, frozen
-5. **Superseded**: Replaced by newer track (link to replacement)
-
-## Checker Validation
-
-Checkers validate tasks against:
-- Acceptance criteria (S1, S2, S3...)
-- Non-goals (must not include)
-- Technical approach (must follow)
+draft → approved → in-progress → complete → superseded

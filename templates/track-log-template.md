@@ -1,98 +1,37 @@
 # Track Log Template
 
-Decisions and learnings for ONE track. Append-only.
+Append-only decisions/learnings for one track.
 
----
+```yaml
+# Log: {Track ID} — {Track Name}
+spec: spec.md
+plan: plan.md
 
-```markdown
-# Log: {Track ID} - {Track Name}
+entries:
+  - date: {date}
+    title: {title}
+    type: decision|learning|pivot|issue
+    task: {task-id or general}
+    context: {what was happening}
+    detail: {what we decided/learned}
+    why: {rationale}
+    implications: {affects going forward}
+    promote:                       # optional
+      patterns: false
+      pitfalls: false
+      risks: false
+      tech_stack: false
 
-*Spec*: [spec.md](spec.md)
-*Plan*: [plan.md](plan.md)
+top_learnings:                     # filled on track completion
+  - {key learning}
 
----
-
-## {Date}: {Entry Title}
-
-**Type**: decision | learning | pivot | issue
-**Task**: {task-id or "general"}
-
-### Context
-{What was happening}
-
-### Decision/Learning
-{What we decided or learned}
-
-### Rationale
-{Why}
-
-### Implications
-{What this affects going forward}
-
-### Promotion Status
-- [ ] Promote to PATTERNS.md (if pattern, needs 2+ uses)
-- [ ] Add to PITFALLS.md (if trap discovered)
-- [ ] Add to RISKS.md (if systemic risk)
-- [ ] Update TECH_STACK.md (if stack decision)
-- [ ] No promotion needed
-
----
-
-## {Date}: {Another Entry}
-
-...
-
----
-
-## Top Learnings (Summary)
-
-<!-- Updated when track completes -->
-1. {Key learning 1}
-2. {Key learning 2}
-3. {Key learning 3}
-
-## Decisions Made
-
-| Decision | Date | Task | Rationale |
-|----------|------|------|-----------|
-| {decision} | {date} | {task-id} | {brief why} |
-
----
-*Append-only during track. "Top Learnings" summarized at track completion.*
+decisions:
+  - what: {decision}
+    date: {date}
+    task: {task-id}
+    why: {brief}
 ```
-
-## Entry Types
-
-| Type | When to Log |
-|------|-------------|
-| **decision** | Chose between alternatives |
-| **learning** | Discovered something unexpected |
-| **pivot** | Changed approach mid-track |
-| **issue** | Hit a blocker or problem |
 
 ## Promotion Flow
-
-After logging, evaluate for promotion:
-
-```
-Learning logged
-     ↓
-Is it generalizable?
-     ↓ Yes
-Is it a pattern (reusable approach)?
-     ↓ Yes → Tag for PATTERNS.md (needs 2nd use to promote)
-     ↓ No
-Is it a pitfall (trap to avoid)?
-     ↓ Yes → Add to PITFALLS.md
-     ↓ No
-Is it a risk (systemic issue)?
-     ↓ Yes → Add to RISKS.md
-     ↓ No
-Stay in track log only
-```
-
-## Keeping It Lean
-
-- Each entry: 5-10 lines max
-- Top Learnings: max 5 items
-- If log exceeds 50 entries, summarize older ones
+Generalizable? → Pattern (needs 2nd use) | Pitfall (trap) | Risk (systemic) | Stay in log.
+Max 5 top learnings. Summarize older entries if log exceeds 50.
