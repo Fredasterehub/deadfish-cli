@@ -59,7 +59,7 @@ For one-shot dispatches, use `codex exec` commands (see [Model Dispatch Referenc
 
 Use `--continue` flag with `claude` CLI for session persistence across cycle kicks:
 ```bash
-claude --continue --print --dangerously-skip-permissions "DEADF_CYCLE $CYCLE_ID ..."
+claude --continue --print --allowedTools "Read,Write,Edit,Bash,Task,Glob,Grep" "DEADF_CYCLE $CYCLE_ID ..."
 ```
 
 This allows STATE.yaml context to carry across cycles without full reload overhead.
@@ -494,7 +494,7 @@ ralph.sh calls Claude Code CLI instead of Clawdbot sessions:
 
 ```bash
 # Core cycle kick (replaces clawdbot session send):
-claude --print --dangerously-skip-permissions "DEADF_CYCLE $CYCLE_ID
+claude --print --allowedTools "Read,Write,Edit,Bash,Task,Glob,Grep" "DEADF_CYCLE $CYCLE_ID
 project: $PROJECT_PATH
 mode: $MODE
 Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DONE"
@@ -502,7 +502,7 @@ Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DON
 
 **Key differences from pipeline version:**
 - `claude --print` outputs to stdout (ralph.sh captures and scans for cycle tokens)
-- `--dangerously-skip-permissions` enables full filesystem and exec access
+- `--allowedTools "Read,Write,Edit,Bash,Task,Glob,Grep"` enables full filesystem and exec access
 - `--continue` can be added for session persistence across cycles
 - No Discord dependency — all communication via stdout and filesystem
 

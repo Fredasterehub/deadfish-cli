@@ -7,7 +7,7 @@
 # decides, never plans. Purely mechanical.
 #
 # Key difference from pipeline version:
-#   - Calls `claude --print --dangerously-skip-permissions` instead of `clawdbot session send`
+#   - Calls `claude --print --allowedTools ...` instead of `clawdbot session send`
 #   - Synchronous execution: claude exits when done, ralph reads stdout
 #   - Scans stdout for CYCLE_OK / CYCLE_FAIL / DONE tokens
 #
@@ -347,7 +347,7 @@ Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DON
     log "Invoking claude --print (iter=$local_iter, phase=$phase, id=${cycle_id:0:8}...)"
 
     # Build command — use eval to handle session_flags which may be empty
-    local cmd="claude --print --dangerously-skip-permissions"
+    local cmd="claude --print --allowedTools 'Read,Write,Edit,Bash,Task,Glob,Grep'"
     if [[ -n "$session_flags" ]]; then
         cmd="$cmd $session_flags"
     fi
