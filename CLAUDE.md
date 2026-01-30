@@ -83,8 +83,16 @@ Read these files (fail if any missing/unparseable):
 ```
 STATE.yaml          — current pipeline state
 POLICY.yaml         — mode behavior, thresholds
+OPS.md              — project-specific build/test/run commands and gotchas (if present)
 task.files_to_load  — files listed in STATE task.files_to_load (cap: <3000 tokens total)
 ```
+
+**OPS.md** is the project-specific operational cache. Keep it under 60 lines. It contains ONLY:
+- Build/test/lint/run commands for this project
+- Recurring gotchas and patterns discovered during development
+- Environment-specific notes (ports, dependencies, config)
+
+**OPS.md is NOT:** a diary, status tracker, or progress log. Status belongs in STATE.yaml. Progress belongs in git history. Keep OPS.md lean — every line is loaded every cycle.
 
 ### Step 2: VALIDATE
 
@@ -123,7 +131,9 @@ Read `phase` and `task.sub_step` from STATE.yaml. The action is deterministic:
 | `execute` | `sub_step: implement` + `last_result.ok == false` + `retry_count < max_retries` | `retry_task` |
 | `execute` | `sub_step: implement` + `last_result.ok == false` + `retry_count >= max_retries` | `rollback_and_escalate` |
 | `complete` | — | `summarize` |
-| Any | Budget exceeded, stuck, state invalid | `escalate` |
+| `execute` | `stuck_count >= stuck_threshold` AND `replan_attempted == false` | `replan_task` |
+| `execute` | `stuck_count >= stuck_threshold` AND `replan_attempted == true` | `escalate` |
+| Any | Budget exceeded, state invalid | `escalate` |
 
 **One cycle = one action. No chaining.**
 
@@ -183,25 +193,81 @@ Print to stdout exactly one of (must be the **LAST LINE** of output):
 
 ### `generate_task` (execute phase)
 
-1. Consult GPT-5.2 planner for next task specification
-2. Prompt includes the sentinel block template with current nonce
-3. Parse output with `extract_plan.py --nonce <nonce>`
-4. On parse success: write TASK.md from parsed plan, update STATE:
+Construct the GPT-5.2 planner prompt using the **layered prompt structure**:
+
+```
+--- ORIENTATION (0a-0c) ---
+0a. Read STATE.yaml: current phase, track, task position, last_result, stuck_count.
+0b. Read track spec and existing plan docs. Read OPS.md if present.
+0c. Search the codebase (`rg`, `find`) for existing implementations related to this track.
+    Do NOT assume functionality is missing — confirm with code search first.
+
+--- OBJECTIVE (1) ---
+1. Generate the next task specification for track "{track.name}".
+   Output EXACTLY ONE sentinel plan block with nonce {nonce}.
+   Follow the <<<PLAN:V1:NONCE={nonce}>>> format precisely.
+
+--- RULES ---
+FILES minimization: Prefer ≤5 files unless strictly necessary.
+  Every file must have a rationale tied to an acceptance criterion.
+Acceptance testability: Each ACn MUST be prefixed:
+  - "DET: ..." for criteria verifiable by deterministic checks (tests, lint, build, CLI output, file existence)
+  - "LLM: ..." for criteria requiring LLM judgment (code quality, design patterns, documentation tone)
+ESTIMATED_DIFF calibration: Estimate smallest plausible implementation.
+  If estimate >200 lines, split into multiple tasks.
+
+--- GUARDRAILS (999+) ---
+99999. Output ONLY the sentinel plan block. No preamble, no explanation.
+999999. Do not hallucinate files that don't exist in the codebase.
+9999999. Acceptance criteria must be testable — no vague verbs without metrics.
+```
+
+Parse output with `extract_plan.py --nonce <nonce>`.
+
+On parse success: write TASK.md from parsed plan, update STATE:
    ```yaml
    task.id: <from plan>
    task.description: <from plan>
    task.sub_step: implement
    task.files_to_load: <from plan FILES>
    ```
-5. On parse failure after retry: `CYCLE_FAIL`
+On parse failure after retry: `CYCLE_FAIL`
 
 ### `implement_task` (execute phase)
 
-1. Dispatch to gpt-5.2-codex:
+1. Construct the implementation prompt using the **layered prompt structure**:
+
+```
+--- ORIENTATION (0a-0c) ---
+0a. Read TASK.md. Restate all acceptance criteria in one sentence each (self-check).
+0b. Read ONLY the files listed in task.files_to_load. Do not explore beyond scope.
+0c. Search (rg) for related symbols, types, and patterns before writing any code.
+    Do NOT assume — verify what exists first.
+    If OPS.md exists, read it for build/test/lint commands.
+
+--- OBJECTIVE (1-2) ---
+1. Implement the smallest change set that satisfies ALL acceptance criteria
+   and stays within ESTIMATED_DIFF × 3 lines.
+2. Run ./verify.sh BEFORE committing. Check the JSON output for "pass": true.
+   NOTE: verify.sh ALWAYS exits 0 — do NOT use exit code to judge pass/fail.
+   Parse stdout JSON and check the "pass" field. If "pass": false, read "failures"
+   array, fix the issues, and re-run. Only commit when "pass": true.
+   Max 3 verify attempts — if still failing after 3, commit anyway and let the
+   orchestrator's verify stage handle it.
+
+--- GUARDRAILS (999+) ---
+99999. Do NOT touch files outside the FILES list unless strictly required.
+999999. Do NOT modify blocked paths (.env*, *.pem, *.key, .ssh/, .git/).
+9999999. Keep git clean — no uncommitted files after commit.
+99999999. No secrets in code. Ever.
+999999999. Commit message format: "{TASK_ID}: {brief description}"
+```
+
+2. Dispatch to gpt-5.2-codex:
    ```bash
    codex exec -m gpt-5.2-codex -c 'model_reasoning_effort="high"' --approval-mode full-auto "<implementation prompt>"
    ```
-2. Read results from git (deterministic, no LLM parsing):
+3. Read results from git (deterministic, no LLM parsing):
    ```
    commit_hash   = git rev-parse HEAD
    exit_code     = codex return code
@@ -209,8 +275,8 @@ Print to stdout exactly one of (must be the **LAST LINE** of output):
    diff_lines    = git diff HEAD~1 --stat         # if HEAD~1 exists
    ```
    Edge case: if this is the first commit (no HEAD~1), use `git diff --cached` or `git show --stat HEAD` instead.
-3. On success (exit 0 + new commit exists): set `task.sub_step: verify`
-4. On failure (nonzero exit or no new commit): set `last_result.ok: false`, `CYCLE_FAIL`
+4. On success (exit 0 + new commit exists): set `task.sub_step: verify`
+5. On failure (nonzero exit or no new commit): set `last_result.ok: false`, `CYCLE_FAIL`
 
 ### `verify_task` (execute phase)
 
@@ -227,16 +293,24 @@ If `verify.sh.pass == false` → FAIL immediately. Do NOT run LLM verifier.
 
 **Stage 2: LLM verification (only if verify.sh passes)**
 
-For each acceptance criterion in the plan:
-1. Spawn sub-agent via the **Task tool** with per-criterion prompt
-2. Include: diff summary, test results, verify.sh JSON
-3. Each sub-agent produces one verdict block
-4. Collect all raw responses
+**DET:/LLM: Skip Logic:** Acceptance criteria prefixed with `DET:` are verified ONLY by verify.sh + deterministic artifacts (test output, file existence, CLI output). Do NOT spawn LLM verifiers for `DET:` criteria — auto-pass them if verify.sh passed. Only spawn LLM sub-agents for `LLM:` prefixed criteria.
+
+For each `LLM:` acceptance criterion:
+1. Build a **per-criterion evidence bundle** (minimal context):
+   - The `ACn` text
+   - verify.sh JSON excerpt: `pass`, `test_summary`, `lint_exit`, `diff_lines`, `secrets_found`, `git_clean`
+   - `git show --stat` (ALL changed files, not just planned ones — flag any out-of-scope changes)
+   - Diff hunks for files relevant to this criterion
+   - Test output (if applicable)
+2. Spawn sub-agent via the **Task tool** with per-criterion prompt + evidence bundle
+3. Sub-agent prompt includes: "If required evidence is missing, answer NO with reason 'insufficient evidence'. Never guess."
+4. Each sub-agent produces one verdict block
+5. Collect all raw responses
 
 **Sub-agent dispatch (Task tool):**
 ```
 Use the Task tool to spawn a sub-agent:
-- Instructions: per-criterion verification prompt with sentinel template
+- Instructions: per-criterion verification prompt with sentinel template + evidence bundle
 - Each sub-agent runs in an isolated context
 - Up to 7 parallel sub-agents supported
 - Sub-agents return results when complete
@@ -275,13 +349,28 @@ On NEEDS_HUMAN: set `phase: needs_human` (all modes)
    - If more tasks in track: `task.sub_step: generate`, increment `task_current`
    - If track complete: `track.status: complete`, move to `tracks_completed`, set `phase: select-track`
    - If all tracks done: `phase: complete`
-4. Reset: `task.retry_count: 0`, `loop.stuck_count: 0`
+4. Reset: `task.retry_count: 0`, `loop.stuck_count: 0`, `task.replan_attempted: false`
 
 ### `retry_task` (execute phase)
 
 1. Increment `task.retry_count`
 2. Set `task.sub_step: implement` (re-enter implementation)
 3. Include failure context in next implementation prompt
+
+### `replan_task` (execute phase — stuck recovery)
+
+Triggered when `stuck_count >= stuck_threshold` AND `replan_attempted == false`.
+
+1. Set `task.replan_attempted: true` in STATE.yaml
+2. Reset `loop.stuck_count: 0`, `task.retry_count: 0`
+3. Set `task.sub_step: generate` (re-enter task generation from scratch)
+4. Log: "Re-planning task {task.id} after {stuck_threshold} stuck cycles"
+5. Reply `CYCLE_OK`
+
+The planner will regenerate the task spec with fresh context on the next cycle.
+If stuck triggers again after re-plan → `escalate` (per DECIDE table).
+
+**State field:** `task.replan_attempted` (boolean, default: false, reset to false on task completion in `reflect`)
 
 ### `rollback_and_escalate` (execute phase)
 
@@ -439,6 +528,26 @@ ESTIMATED_DIFF=<positive integer>
 <<<END_PLAN:NONCE={nonce}>>>
 ```
 
+**Acceptance criteria prefix convention:**
+- `DET: ...` — Deterministic: auto-passed when verify.sh reports `"pass": true`. **DET criteria MUST map to one of verify.sh's 6 checks:**
+  1. Tests pass (pytest/jest/etc exit 0)
+  2. Lint passes (configured linter exit 0)
+  3. Build succeeds (if applicable)
+  4. Diff lines within 3× ESTIMATED_DIFF
+  5. No secrets detected
+  6. Git tree clean (no uncommitted files)
+- `LLM: ...` — LLM-judged: requires sub-agent reasoning (code quality, design, documentation tone, file existence, specific output matching, anything NOT in the 6 checks above)
+
+Examples:
+- `id=AC1 text="DET: All tests pass with ≥1 new test added"`
+- `id=AC2 text="DET: No lint errors introduced"`
+- `id=AC3 text="LLM: Error messages are user-friendly and follow project tone"`
+- `id=AC4 text="LLM: File src/auth.py exports AuthHandler class with login() method"`
+
+**Important:** File existence and content checks are `LLM:`, not `DET:` — verify.sh does not check specific file contents.
+
+The orchestrator uses these prefixes to skip LLM verification for `DET:` criteria (auto-pass if verify.sh passed).
+
 Parse with: `python3 extract_plan.py --nonce <nonce> < raw_output`
 
 ### Verdict Block Format
@@ -468,11 +577,23 @@ If `extract_plan.py` or `build_verdict.py` exits 1:
 
 | Trigger | Condition | Action |
 |---------|-----------|--------|
-| Stuck | `stuck_count >= stuck_threshold` (default: 3) | `phase: needs_human`, notify Fred |
+| Stuck (first) | `stuck_count >= stuck_threshold` (default: 3) AND `replan_attempted == false` | **Re-plan**: regenerate task from scratch (see below) |
+| Stuck (after re-plan) | `stuck_count >= stuck_threshold` AND `replan_attempted == true` | `phase: needs_human`, notify Fred |
 | Budget time | `now() - budget.started_at >= max_hours` | `phase: needs_human`, notify Fred |
 | 3x task failure | `task.retry_count >= max_retries` | Rollback + `phase: needs_human` |
 | State invalid | STATE.yaml unparseable or schema mismatch | `phase: needs_human`, `CYCLE_FAIL` |
 | Parse failure | Actor output invalid after 1 retry | `CYCLE_FAIL` |
+
+### Plan Disposability (Re-plan Before Escalate)
+
+When stuck detection triggers for the first time on a task:
+1. Set `replan_attempted: true` in STATE.yaml
+2. Reset `stuck_count: 0`, `task.retry_count: 0`
+3. Set `task.sub_step: generate` (re-enter task generation)
+4. The planner will regenerate the task spec from scratch with fresh context
+5. If stuck triggers again after re-plan → escalate to `needs_human`
+
+**Rationale (from Ralph Wiggum methodology):** Plans drift. Regenerating a plan is cheap (one cycle). Grinding on a stale plan wastes more cycles than starting fresh. "The plan is a tool, not an artifact."
 
 ---
 
