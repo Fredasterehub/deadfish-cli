@@ -183,11 +183,6 @@ if [[ "$sig_tests" -eq 1 ]]; then signals+=("sig_tests"); fi
 
 brownfield_score=$((sig_git + sig_source + sig_deps + sig_ci))
 
-returning=0
-if [[ -f "$PROJECT_PATH/.deadf/seed/P2_DONE" && -f "$PROJECT_PATH/STATE.yaml" ]]; then
-    returning=1
-fi
-
 # Depth selection (MVP: 1-2 only)
 depth=1
 if [[ "$src_count" -ge 200 || "$sig_readme" -eq 0 || "$lang_count" -ge 2 ]]; then
@@ -200,11 +195,6 @@ if [[ ${#signals[@]} -gt 0 ]]; then
     for ((i=1; i<${#signals[@]}; i++)); do
         json_signals+=",\"${signals[$i]}\""
     done
-fi
-
-if [[ "$returning" -eq 1 ]]; then
-    printf '{"type":"returning","signals":[%s],"depth":%s,"src_count":%s}\n' "$json_signals" "$depth" "$src_count"
-    exit 2
 fi
 
 if [[ "$brownfield_score" -ge 2 ]]; then

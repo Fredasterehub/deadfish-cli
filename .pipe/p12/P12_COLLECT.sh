@@ -179,7 +179,11 @@ while IFS= read -r f; do
  done < <(
     find "$PROJECT_PATH" -maxdepth "$FIND_MAX_DEPTH" \
         \( -type d \( "${PRUNE_ARGS[@]}" \) -prune \) -o \
-        -type f \( -name "main.*" -o -name "index.*" -o -name "app.*" \) -print | sort
+        -type f \( \
+            -name "main.ts" -o -name "main.js" -o -name "main.py" -o -name "main.go" -o -name "main.rs" \
+            -o -name "index.ts" -o -name "index.js" -o -name "index.py" \
+            -o -name "app.ts" -o -name "app.js" -o -name "app.py" -o -name "app.rb" \
+        \) -print | sort
  )
 
 exit 0

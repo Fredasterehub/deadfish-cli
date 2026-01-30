@@ -26,12 +26,12 @@ Write each file. Use exactly these filenames:
 6. PRODUCT.md (~400t)
 7. GLOSSARY.md (~200t)
 
-Each file format:
-```markdown
-# {DOC_NAME}.md
-
+Output each file using this exact marker format:
+<<<FILE:TECH_STACK.md>>>
 ```yaml
-{doc_name}_yaml<={budget}t:
-  {content}
+tech_stack_yaml<=400t:
+  ...
 ```
-```
+<<<END_FILE>>>
+
+Repeat for all 7 files using their respective filenames and budgets.

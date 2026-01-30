@@ -57,6 +57,7 @@ P12_DIR="$PROJECT_PATH/.deadf/p12"
 OUT_DIR="$P12_DIR/out"
 DONE_MARKER="$P12_DIR/P12_DONE"
 UNVERIFIED_MARKER="$P12_DIR/P12_UNVERIFIED"
+SKIPPED_MARKER="$P12_DIR/P12_SKIPPED"
 
 DOCS=(
     TECH_STACK.md
@@ -95,6 +96,7 @@ edit_doc() {
 }
 
 SKIPPED=()
+CONFIRMED=0
 
 for doc in "${DOCS[@]}"; do
     src="$OUT_DIR/$doc"
@@ -122,10 +124,12 @@ for doc in "${DOCS[@]}"; do
             C|c)
                 cp "$src" "$dest"
                 echo "Wrote: $dest"
+                CONFIRMED=$((CONFIRMED + 1))
                 break
                 ;;
             E|e)
                 edit_doc "$src" "$dest"
+                CONFIRMED=$((CONFIRMED + 1))
                 break
                 ;;
             S|s)
@@ -151,6 +155,12 @@ fi
 mkdir -p "$P12_DIR"
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
     printf '%s\n' "${SKIPPED[@]}" > "$UNVERIFIED_MARKER"
+fi
+
+if [[ "$CONFIRMED" -eq 0 ]]; then
+    touch "$SKIPPED_MARKER"
+    echo "P12 confirm skipped: $SKIPPED_MARKER"
+    exit 3
 fi
 
 touch "$DONE_MARKER"

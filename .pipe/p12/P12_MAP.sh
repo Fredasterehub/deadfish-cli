@@ -242,19 +242,32 @@ if command -v claude >/dev/null 2>&1; then
     if [[ -f "$PROMPT_DIR/MAPPER_AGENT.md" ]]; then
         prompt_file="$(mktemp)"
         TMP_FILES+=("$prompt_file")
+        evidence_tmp="$(mktemp)"
+        TMP_FILES+=("$evidence_tmp")
+        if [[ -d "$EVIDENCE_DIR" ]]; then
+            while IFS= read -r f; do
+                printf '### %s\n' "$(basename "$f")" >> "$evidence_tmp"
+                cat "$f" >> "$evidence_tmp"
+                printf '\n\n' >> "$evidence_tmp"
+            done < <(find "$EVIDENCE_DIR" -type f -maxdepth 1 -print | sort)
+        else
+            printf '### no-evidence\nNo evidence collected.\n' > "$evidence_tmp"
+        fi
+
+        max_bytes=102400
+        evidence_size=$(wc -c < "$evidence_tmp")
+        if [[ "$evidence_size" -gt "$max_bytes" ]]; then
+            truncated_tmp="$(mktemp)"
+            TMP_FILES+=("$truncated_tmp")
+            head -c "$max_bytes" "$evidence_tmp" > "$truncated_tmp"
+            mv "$truncated_tmp" "$evidence_tmp"
+            printf '\n[TRUNCATED: evidence exceeded 100KB limit. Analysis based on first 100KB.]\n' >> "$evidence_tmp"
+        fi
+
         {
             cat "$PROMPT_DIR/MAPPER_AGENT.md"
             printf '\n<raw_data>\n'
-            if [[ -d "$EVIDENCE_DIR" ]]; then
-                while IFS= read -r f; do
-                    printf '### %s\n' "$(basename "$f")"
-                    cat "$f"
-                    printf '\n\n'
-                done < <(find "$EVIDENCE_DIR" -type f -maxdepth 1 -print | sort)
-            else
-                printf '### no-evidence\n'
-                printf 'No evidence collected.\n'
-            fi
+            cat "$evidence_tmp"
             printf '</raw_data>\n'
         } > "$prompt_file"
         if claude --print < "$prompt_file" > "$ANALYSIS_FILE"; then

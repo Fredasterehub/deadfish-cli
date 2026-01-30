@@ -105,6 +105,14 @@ if [[ ! -f "$TEMPLATE_FILE" ]]; then
     exit 1
 fi
 
+print_minimal_context() {
+    cat <<'EOF'
+## Existing Codebase Context
+
+Brownfield project detected but living docs are incomplete. Treat as greenfield brainstorm.
+EOF
+}
+
 extract_yaml_block() {
     local file="$1"
     awk '
@@ -142,27 +150,21 @@ extract_open_questions() {
     '
 }
 
-# Graceful degradation: missing docs → emit minimal context block, don't fatal (MEDIUM-3 fix)
-if [[ ! -f "$TECH_FILE" ]]; then
-    echo "Warning: Missing TECH_STACK file: $TECH_FILE — degrading to minimal context" >&2
-    TECH_YAML="# No tech stack data available (P12 incomplete)"
-else
-    TECH_YAML="$(extract_yaml_block "$TECH_FILE")"
-fi
-if [[ ! -f "$PRODUCT_FILE" ]]; then
-    echo "Warning: Missing PRODUCT file: $PRODUCT_FILE — degrading to minimal context" >&2
-    PRODUCT_YAML="# No product data available (P12 incomplete)"
-else
-    PRODUCT_YAML="$(extract_yaml_block "$PRODUCT_FILE")"
+if [[ ! -f "$TECH_FILE" || ! -f "$PRODUCT_FILE" ]]; then
+    print_minimal_context
+    exit 0
 fi
 
+TECH_YAML="$(extract_yaml_block "$TECH_FILE")"
+PRODUCT_YAML="$(extract_yaml_block "$PRODUCT_FILE")"
+
 if [[ -z "$TECH_YAML" ]]; then
-    echo "Warning: Empty YAML from: $TECH_FILE — using placeholder" >&2
-    TECH_YAML="# Tech stack data unavailable"
+    echo "Failed to extract YAML from: $TECH_FILE" >&2
+    exit 1
 fi
 if [[ -z "$PRODUCT_YAML" ]]; then
-    echo "Warning: Empty YAML from: $PRODUCT_FILE — using placeholder" >&2
-    PRODUCT_YAML="# Product data unavailable"
+    echo "Failed to extract YAML from: $PRODUCT_FILE" >&2
+    exit 1
 fi
 
 OPEN_QUESTIONS=""
