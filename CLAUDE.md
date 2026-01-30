@@ -145,7 +145,7 @@ Run the determined action. See [Action Specifications](#action-specifications) b
 
 ### Step 5: RECORD
 
-Update STATE.yaml atomically (write to temp file, then rename):
+Update STATE.yaml atomically **under the shared `STATE.yaml.flock` lock** (read → compute → temp write → `mv`; use `flock -w 5`):
 - `cycle.status`: `complete` (action succeeded) or `failed` (action failed)
 - `cycle.finished_at`: ISO-8601 timestamp
 - `loop.iteration`: **always increment** (even on failure)
@@ -645,7 +645,19 @@ Each file contains: event type, timestamp, context, and any required human actio
 | **Claude Code** | Everything else in STATE.yaml |
 | **All others** | Nothing (stdout only) |
 
-**Atomic writes:** Always write to a temp file, then `mv` to STATE.yaml. Never partial writes.
+**Atomic writes with shared lock:** All STATE.yaml writers (Ralph AND Orchestrator) MUST acquire an exclusive `flock` on `STATE.yaml.flock` for the entire read-modify-write critical section. Use bounded wait (`flock -w 5`). On lock failure, treat as cycle failure and escalate.
+
+```bash
+# Required pattern for ALL STATE.yaml writes:
+(
+  flock -w 5 9 || exit 70
+  tmp=$(mktemp "${STATE_FILE}.tmp.XXXXXX")
+  yq --arg v "$value" ".$field = \$v" "$STATE_FILE" > "$tmp"
+  mv -f "$tmp" "$STATE_FILE"
+) 9>"${STATE_FILE}.flock"
+```
+
+Never write to STATE.yaml without holding this lock. Never partial writes.
 
 ---
 

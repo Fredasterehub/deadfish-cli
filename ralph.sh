@@ -1,27 +1,19 @@
 #!/bin/bash
-# deadf(ish) CLI — ralph.sh (Loop Controller)
-# Architecture: v2.4.2 — Claude Code CLI Port
+# deadf(ish) Pipeline — ralph.sh (Loop Controller)
+# Architecture: v2.4.2
 #
 # Ralph is the mechanical loop controller. He kicks cycles, watches state,
 # enforces timeouts, manages locks, rotates logs. He never thinks, never
 # decides, never plans. Purely mechanical.
 #
-# Key difference from pipeline version:
-#   - Calls `claude --print --allowedTools ...` instead of `clawdbot session send`
-#   - Synchronous execution: claude exits when done, ralph reads stdout
-#   - Scans stdout for CYCLE_OK / CYCLE_FAIL / DONE tokens
-#
 # Write permissions (STATE.yaml):
 #   phase        → "needs_human" ONLY
 #   cycle.status → "timed_out" ONLY
-#   Everything else belongs to Claude Code.
+#   Everything else belongs to the Orchestrator.
 #
 # Usage: ralph.sh <project_path> [mode]
 
 set -uo pipefail
-
-# ── Version ────────────────────────────────────────────────────────────────
-RALPH_VERSION="2.4.2-cli"
 
 # ── Arguments ──────────────────────────────────────────────────────────────
 PROJECT_PATH="${1:?Usage: ralph.sh <project_path> [mode]}"
@@ -29,123 +21,141 @@ MODE="${2:-yolo}"
 
 # ── Configuration ──────────────────────────────────────────────────────────
 CYCLE_TIMEOUT="${RALPH_TIMEOUT:-600}"
+POLL_INTERVAL="${RALPH_POLL:-15}"
 LOG_DIR="$PROJECT_PATH/.deadf/logs"
 LOCK_FILE="$PROJECT_PATH/.deadf/ralph.lock"
 STATE_FILE="$PROJECT_PATH/STATE.yaml"
-NOTIFY_DIR="$PROJECT_PATH/.deadf/notifications"
+STATE_LOCK_FILE="${STATE_FILE}.flock"
 MAX_LOG_FILES="${RALPH_MAX_LOGS:-50}"
-STALE_LOCK_AGE=86400  # 24 hours in seconds
+ROTATE_LOGS="${RALPH_ROTATE_LOGS:-1}"
+DISPATCH_TIMEOUT="${RALPH_DISPATCH_TIMEOUT:-$CYCLE_TIMEOUT}"
+STATE_LOCK_TIMEOUT=5
+STATE_UPDATE_RETRIES=3
 
-# New CLI-specific configuration
-RATE_LIMIT="${RALPH_RATE_LIMIT:-5}"             # Minimum seconds between cycles
-MAX_FAILURES="${RALPH_MAX_FAILURES:-10}"         # Circuit breaker: consecutive failures
-SESSION_MODE="${RALPH_SESSION:-auto}"            # auto|fresh|continue
-SESSION_FILE="$PROJECT_PATH/.deadf/.claude_session_id"
-SESSION_MAX_AGE="${RALPH_SESSION_MAX_AGE:-3600}" # Session expiry in seconds (1hr)
-MIN_CLAUDE_VERSION="${RALPH_MIN_CLAUDE:-1.0.0}"  # Minimum claude CLI version
-
-# Task Management configuration (supplementary — does not replace stdout scanning)
-RALPH_TASK_LIST_ID="${RALPH_TASK_LIST_ID:-"deadf-$(basename "$PROJECT_PATH")"}"
-TASKS_DIR="${HOME}/.claude/tasks"
-
-# ── Color Output ───────────────────────────────────────────────────────────
-if [[ -t 1 ]]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    CYAN='\033[0;36m'
-    BOLD='\033[1m'
-    NC='\033[0m'
-else
-    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
-fi
+# ── Validate Numeric Config ────────────────────────────────────────────────
+[[ "$CYCLE_TIMEOUT" =~ ^[0-9]+$ ]]  || { echo "[ralph] ERROR: RALPH_TIMEOUT must be a positive integer, got: $CYCLE_TIMEOUT" >&2; exit 1; }
+[[ "$CYCLE_TIMEOUT" -ge 1 ]]        || { echo "[ralph] ERROR: RALPH_TIMEOUT must be ≥1, got: $CYCLE_TIMEOUT" >&2; exit 1; }
+[[ "$POLL_INTERVAL" =~ ^[0-9]+$ ]]  || { echo "[ralph] ERROR: RALPH_POLL must be a positive integer, got: $POLL_INTERVAL" >&2; exit 1; }
+[[ "$POLL_INTERVAL" -ge 1 ]]        || { echo "[ralph] ERROR: RALPH_POLL must be ≥1, got: $POLL_INTERVAL" >&2; exit 1; }
+[[ "$MAX_LOG_FILES" =~ ^[0-9]+$ ]]    || { echo "[ralph] ERROR: RALPH_MAX_LOGS must be a positive integer, got: $MAX_LOG_FILES" >&2; exit 1; }
+[[ "$MAX_LOG_FILES" -ge 1 ]]           || { echo "[ralph] ERROR: RALPH_MAX_LOGS must be ≥1, got: $MAX_LOG_FILES" >&2; exit 1; }
+[[ "$ROTATE_LOGS" =~ ^[0-9]+$ ]]      || { echo "[ralph] ERROR: RALPH_ROTATE_LOGS must be 0 or 1, got: $ROTATE_LOGS" >&2; exit 1; }
+[[ "$ROTATE_LOGS" -eq 0 || "$ROTATE_LOGS" -eq 1 ]] || { echo "[ralph] ERROR: RALPH_ROTATE_LOGS must be 0 or 1, got: $ROTATE_LOGS" >&2; exit 1; }
+[[ "$DISPATCH_TIMEOUT" =~ ^[0-9]+$ ]] || { echo "[ralph] ERROR: RALPH_DISPATCH_TIMEOUT must be a positive integer, got: $DISPATCH_TIMEOUT" >&2; exit 1; }
+[[ "$DISPATCH_TIMEOUT" -ge 1 ]]        || { echo "[ralph] ERROR: RALPH_DISPATCH_TIMEOUT must be ≥1, got: $DISPATCH_TIMEOUT" >&2; exit 1; }
 
 # ── Preflight ──────────────────────────────────────────────────────────────
-[[ -d "$PROJECT_PATH" ]] || { echo -e "${RED}[ralph] ERROR: Project path does not exist: $PROJECT_PATH${NC}" >&2; exit 1; }
-[[ -f "$STATE_FILE" ]]   || { echo -e "${RED}[ralph] ERROR: STATE.yaml not found: $STATE_FILE${NC}" >&2; exit 1; }
+[[ -d "$PROJECT_PATH" ]] || { echo "[ralph] ERROR: Project path does not exist: $PROJECT_PATH" >&2; exit 1; }
+[[ -f "$STATE_FILE" ]]   || { echo "[ralph] ERROR: STATE.yaml not found: $STATE_FILE" >&2; exit 1; }
 
-mkdir -p "$LOG_DIR"    || { echo -e "${RED}[ralph] ERROR: Cannot create log dir: $LOG_DIR${NC}" >&2; exit 1; }
-mkdir -p "$NOTIFY_DIR" || { echo -e "${RED}[ralph] ERROR: Cannot create notify dir: $NOTIFY_DIR${NC}" >&2; exit 1; }
+mkdir -p "$LOG_DIR" || { echo "[ralph] ERROR: Cannot create log dir: $LOG_DIR" >&2; exit 1; }
 
-command -v yq &>/dev/null    || { echo -e "${RED}[ralph] ERROR: yq required but not found${NC}" >&2; exit 1; }
-command -v claude &>/dev/null || { echo -e "${RED}[ralph] ERROR: claude CLI required but not found${NC}" >&2; exit 1; }
-
-# Task Management preflight (supplementary — warn only, never fail)
-if [[ -d "$TASKS_DIR" ]]; then
-    echo -e "${GREEN}[ralph]${NC} Tasks directory accessible: $TASKS_DIR"
-else
-    echo -e "${YELLOW}[ralph]${NC} ⚠️  Tasks directory not found: $TASKS_DIR (Task Management is supplementary — continuing)"
+command -v yq &>/dev/null       || { echo "[ralph] ERROR: yq required but not found" >&2; exit 1; }
+# Verify mikefarah/yq v4+ (required for -r and expression syntax)
+if ! yq --version 2>/dev/null | grep -qE 'version v?4\.'; then
+    echo "[ralph] ERROR: yq v4.x required (mikefarah/yq). Found: $(yq --version 2>/dev/null || echo 'unknown')" >&2
+    exit 1
 fi
+command -v pgrep &>/dev/null    || { echo "[ralph] ERROR: pgrep required but not found" >&2; exit 1; }
+command -v stat &>/dev/null     || { echo "[ralph] ERROR: stat required but not found" >&2; exit 1; }
+command -v flock &>/dev/null    || { echo "[ralph] ERROR: flock required but not found" >&2; exit 1; }
+command -v mktemp &>/dev/null   || { echo "[ralph] ERROR: mktemp required but not found" >&2; exit 1; }
 
-# ── Claude CLI Version Check ──────────────────────────────────────────────
-check_claude_version() {
-    local version_output
-    version_output=$(claude --version 2>/dev/null || echo "0.0.0")
-    # Extract version number (handles formats like "claude 1.2.3" or just "1.2.3")
-    local version
-    version=$(echo "$version_output" | grep -oP '\d+\.\d+\.\d+' | head -1)
-    [[ -z "$version" ]] && version="0.0.0"
-
-    # Simple semver comparison
-    local IFS='.'
-    read -r maj1 min1 pat1 <<< "$version"
-    read -r maj2 min2 pat2 <<< "$MIN_CLAUDE_VERSION"
-
-    if (( maj1 < maj2 || (maj1 == maj2 && min1 < min2) || (maj1 == maj2 && min1 == min2 && pat1 < pat2) )); then
-        echo -e "${RED}[ralph] ERROR: claude CLI version $version < minimum $MIN_CLAUDE_VERSION${NC}" >&2
+# ── Dispatch Configuration ─────────────────────────────────────────────────
+DISPATCH_CMD="${RALPH_DISPATCH_CMD:?RALPH_DISPATCH_CMD must be set (e.g. orchestrator session send --message)}"
+if yq -e 'type == "!!seq"' <<<"$DISPATCH_CMD" >/dev/null 2>&1; then
+    mapfile -t DISPATCH_CMD_ARR < <(yq -r '.[]' <<<"$DISPATCH_CMD" 2>/dev/null)
+    if [[ ${#DISPATCH_CMD_ARR[@]} -eq 0 ]]; then
+        echo "[ralph] ERROR: RALPH_DISPATCH_CMD is an empty JSON/YAML array" >&2
         exit 1
     fi
-    log "Claude CLI version: $version (minimum: $MIN_CLAUDE_VERSION)"
-}
+else
+    echo "[ralph] WARN: RALPH_DISPATCH_CMD is not a JSON/YAML array; falling back to whitespace split (quoting not supported)" >&2
+    read -r -a DISPATCH_CMD_ARR <<<"$DISPATCH_CMD"
+    if [[ ${#DISPATCH_CMD_ARR[@]} -eq 0 ]]; then
+        echo "[ralph] ERROR: RALPH_DISPATCH_CMD is empty or whitespace-only" >&2
+        exit 1
+    fi
+fi
+DISPATCH_EXE="${DISPATCH_CMD_ARR[0]}"
+command -v "$DISPATCH_EXE" &>/dev/null || { echo "[ralph] ERROR: dispatch command not found on PATH: $DISPATCH_EXE" >&2; exit 1; }
+
+if command -v timeout &>/dev/null; then
+    TIMEOUT_CMD="timeout"
+elif command -v gtimeout &>/dev/null; then
+    TIMEOUT_CMD="gtimeout"
+    echo "[ralph] INFO: Using gtimeout fallback (gtimeout)" >&2
+else
+    echo "[ralph] ERROR: timeout (or gtimeout) required but not found" >&2
+    exit 1
+fi
+
+STAT_STYLE=""
+if stat -c '%a' "$STATE_FILE" >/dev/null 2>&1; then
+    STAT_STYLE="gnu"
+elif stat -f '%Lp' "$STATE_FILE" >/dev/null 2>&1; then
+    STAT_STYLE="bsd"
+else
+    echo "[ralph] ERROR: stat does not support -c '%a' (GNU) or -f '%Lp' (BSD). Cannot preserve permissions safely." >&2
+    exit 1
+fi
 
 # ── Logging ────────────────────────────────────────────────────────────────
-log() { echo -e "${CYAN}[ralph]${NC} $(date -Iseconds) $*"; }
-log_ok() { echo -e "${GREEN}[ralph]${NC} $(date -Iseconds) $*"; }
-log_warn() { echo -e "${YELLOW}[ralph]${NC} $(date -Iseconds) ⚠️  $*"; }
-log_err() { echo -e "${RED}[ralph]${NC} $(date -Iseconds) ERROR: $*" >&2; }
+log() { echo "[ralph] $(date -u -Iseconds) $*"; }
+log_err() { echo "[ralph] $(date -u -Iseconds) ERROR: $*" >&2; }
+
+stat_perms() {
+    case "$STAT_STYLE" in
+        gnu) stat -c '%a' "$1" ;;
+        bsd) stat -f '%Lp' "$1" ;;
+        *) return 1 ;;
+    esac
+}
 
 # ── Lock Management ───────────────────────────────────────────────────────
+# Lockfile held by flock for the lifetime of this process.
+
+LOCK_FD=""
+
 acquire_lock() {
-    if ! ( set -o noclobber; echo "$$ $(date -Iseconds)" > "$LOCK_FILE" ) 2>/dev/null; then
-        local other_pid other_ts
-        read -r other_pid other_ts < "$LOCK_FILE" 2>/dev/null || true
-
-        if [[ -z "$other_pid" ]]; then
-            log "Empty lockfile. Taking over."
-            echo "$$ $(date -Iseconds)" > "$LOCK_FILE"
-            return 0
-        fi
-
-        if kill -0 "$other_pid" 2>/dev/null; then
-            if [[ -n "$other_ts" ]]; then
-                local lock_epoch
-                lock_epoch=$(date -d "$other_ts" +%s 2>/dev/null || echo 0)
-                local now_epoch
-                now_epoch=$(date +%s)
-                local lock_age=$(( now_epoch - lock_epoch ))
-
-                if [[ "$lock_age" -gt "$STALE_LOCK_AGE" ]]; then
-                    log_warn "Lock PID $other_pid alive but ${lock_age}s old (>${STALE_LOCK_AGE}s). Assuming stale."
-                    echo "$$ $(date -Iseconds)" > "$LOCK_FILE"
-                    return 0
-                fi
-            fi
-            log_err "Another instance running (PID $other_pid). Exiting."
-            exit 1
-        else
-            log "Stale lock (PID $other_pid dead). Taking over."
-            echo "$$ $(date -Iseconds)" > "$LOCK_FILE"
-        fi
+    exec {LOCK_FD}> "$LOCK_FILE" || { log_err "Cannot open lock file: $LOCK_FILE"; exit 1; }
+    if ! flock -n "$LOCK_FD"; then
+        log "Another instance running. Exiting."
+        exit 1
     fi
+    printf '%s %s\n' "$$" "$(date -u -Iseconds)" >&"$LOCK_FD" || true
 }
 
 release_lock() {
-    rm -f "$LOCK_FILE"
+    if [[ -n "${LOCK_FD:-}" ]]; then
+        flock -u "$LOCK_FD" 2>/dev/null || true
+        exec {LOCK_FD}>&- || true
+        LOCK_FD=""
+    fi
 }
 
 # ── Signal Handling ────────────────────────────────────────────────────────
 SHUTTING_DOWN=0
+
+collect_descendants() {
+    local root_pid="$1"
+    local -a queue next
+    local depth=0
+    local max_depth=6
+    queue=("$root_pid")
+    while [[ ${#queue[@]} -gt 0 && "$depth" -lt "$max_depth" ]]; do
+        next=()
+        for pid in "${queue[@]}"; do
+            while IFS= read -r child; do
+                [[ -n "$child" ]] || continue
+                echo "$child"
+                next+=("$child")
+            done < <(pgrep -P "$pid" 2>/dev/null || true)
+        done
+        queue=("${next[@]}")
+        depth=$((depth + 1))
+    done
+}
 
 cleanup() {
     if [[ "$SHUTTING_DOWN" -eq 1 ]]; then
@@ -153,13 +163,47 @@ cleanup() {
     fi
     SHUTTING_DOWN=1
     log "🛑 Signal received. Shutting down gracefully."
+    # Collect descendants to avoid orphaned timeout/dispatch children
+    local descendants
+    descendants="$(collect_descendants "$$")"
+    if [[ -n "$descendants" ]]; then
+        while IFS= read -r pid; do
+            [[ -n "$pid" ]] || continue
+            kill -TERM "$pid" 2>/dev/null || true
+        done <<< "$descendants"
+    fi
+    # Bounded wait for children to exit (max 5 seconds)
+    local _wait_count=0
+    while [[ $_wait_count -lt 5 ]] && pgrep -P $$ &>/dev/null; do
+        sleep 1
+        _wait_count=$((_wait_count + 1))
+    done
+    # Force-kill any stragglers (including re-parented descendants)
+    local remaining
+    remaining="$descendants
+$(collect_descendants "$$")"
+    if [[ -n "$remaining" ]]; then
+        while IFS= read -r pid; do
+            [[ -n "$pid" ]] || continue
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done <<< "$remaining"
+        sleep 0.5
+    fi
     release_lock
-    print_summary
     log "Shutdown complete."
     exit 130
 }
 
-trap cleanup INT TERM
+on_exit() {
+    local exit_code=$?
+    release_lock
+    exit "$exit_code"
+}
+
+trap cleanup INT TERM HUP QUIT
+trap on_exit EXIT
 
 # ── STATE.yaml Helpers ─────────────────────────────────────────────────────
 read_field() {
@@ -172,27 +216,128 @@ get_cycle_status() { read_field "cycle.status"; }
 get_max_iter()     { read_field "loop.max_iterations"; }
 
 # Ralph may ONLY set these specific values:
+# Uses atomic temp+rename + shared flock to avoid race conditions with orchestrator writes.
+update_state_field() {
+    local field="$1"
+    local value="$2"
+    local attempt
+    local tmp
+    if ! { [[ "$field" == "phase" && "$value" == "needs_human" ]] \
+        || [[ "$field" == "cycle.status" && "$value" == "timed_out" ]]; }; then
+        log_err "Refusing unauthorized state write: ${field}=${value}"
+        return 1
+    fi
+    for ((attempt=1; attempt<=STATE_UPDATE_RETRIES; attempt++)); do
+        tmp=$(mktemp "${STATE_FILE}.ralph.tmp.XXXXXX") || {
+            log_err "FAILED to create temp file for STATE.yaml update (attempt ${attempt}/${STATE_UPDATE_RETRIES})"
+            sleep 0.2
+            continue
+        }
+        if (
+            flock -w "$STATE_LOCK_TIMEOUT" 9 || {
+                log_err "Cannot acquire lock on STATE.yaml (attempt ${attempt}/${STATE_UPDATE_RETRIES})"
+                exit 10
+            }
+            local orig_perms
+            orig_perms=$(stat_perms "$STATE_FILE" 2>/dev/null) || orig_perms=""
+            if ! yq --arg value "$value" ".${field} = \$value" "$STATE_FILE" > "$tmp" 2>/dev/null; then
+                log_err "FAILED to write ${field}=${value} to STATE.yaml (attempt ${attempt}/${STATE_UPDATE_RETRIES})"
+                rm -f "$tmp"
+                exit 11
+            fi
+            if ! mv -f "$tmp" "$STATE_FILE"; then
+                log_err "FAILED to mv tmp file for ${field}=${value} (attempt ${attempt}/${STATE_UPDATE_RETRIES})"
+                rm -f "$tmp"
+                exit 12
+            fi
+            [[ -n "$orig_perms" ]] && chmod "$orig_perms" "$STATE_FILE" 2>/dev/null || true
+        ) 9>"$STATE_LOCK_FILE"; then
+            return 0
+        fi
+        rm -f "$tmp"
+        sleep 0.2
+    done
+    return 1
+}
+
 set_phase_needs_human() {
-    yq -i '.phase = "needs_human"' "$STATE_FILE"
+    if ! update_state_field "phase" "needs_human"; then
+        log_err "FAILED to update phase=needs_human after ${STATE_UPDATE_RETRIES} attempts"
+        return 1
+    fi
 }
 
 set_cycle_timed_out() {
-    yq -i '.cycle.status = "timed_out"' "$STATE_FILE"
+    if ! update_state_field "cycle.status" "timed_out"; then
+        log_err "FAILED to update cycle.status=timed_out after ${STATE_UPDATE_RETRIES} attempts"
+        return 1
+    fi
+}
+
+require_state_update() {
+    local what="$1"
+    shift
+    if ! "$@"; then
+        log_err "State update failed: ${what}"
+        if [[ "$what" != "phase=needs_human" ]]; then
+            set_phase_needs_human 2>/dev/null || log_err "Also failed to set phase=needs_human"
+        fi
+        release_lock
+        exit 1
+    fi
+}
+
+# ── State Validation ───────────────────────────────────────────────────────
+validate_state() {
+    if ! yq '.' "$STATE_FILE" > /dev/null 2>&1; then
+        log_err "STATE.yaml is unparseable"
+        set_phase_needs_human 2>/dev/null || true
+        release_lock
+        exit 1
+    fi
+    local phase
+    local cycle_status
+    phase=$(read_field "phase")
+    cycle_status=$(read_field "cycle.status")
+    case "$phase" in
+        research|select-track|execute|complete|needs_human) ;;
+        *) log_err "STATE.yaml has invalid phase or cycle.status (phase=$phase, cycle.status=$cycle_status)"
+           set_phase_needs_human 2>/dev/null || true
+           release_lock
+           exit 1
+           ;;
+    esac
+    case "$cycle_status" in
+        idle|running|complete|failed|timed_out) ;;
+        *) log_err "STATE.yaml has invalid phase or cycle.status (phase=$phase, cycle.status=$cycle_status)"
+           set_phase_needs_human 2>/dev/null || true
+           release_lock
+           exit 1
+           ;;
+    esac
 }
 
 # ── Log Rotation ───────────────────────────────────────────────────────────
+# INTENTIONAL ENHANCEMENT: Log rotation is not part of the v2.4.2 pseudocode.
+# It is included here to prevent unbounded log accumulation in long-running
+# deployments. Disable with RALPH_ROTATE_LOGS=0 if full log retention is needed.
+# Keep the most recent $MAX_LOG_FILES log files, delete older ones.
 rotate_logs() {
+    if [[ "$ROTATE_LOGS" == "0" ]]; then
+        return 0
+    fi
+
     local log_count
     log_count=$(find "$LOG_DIR" -maxdepth 1 -name 'cycle-*.log' -type f 2>/dev/null | wc -l)
 
     if [[ "$log_count" -gt "$MAX_LOG_FILES" ]]; then
         local to_remove=$(( log_count - MAX_LOG_FILES ))
         log "Rotating logs: removing $to_remove oldest files (keeping $MAX_LOG_FILES)"
-        find "$LOG_DIR" -maxdepth 1 -name 'cycle-*.log' -type f -printf '%T@ %p\n' \
-            | sort -n \
-            | head -n "$to_remove" \
-            | awk '{print $2}' \
-            | xargs -r rm -f
+        # POSIX-compatible: use ls -t (newest first), tail to get oldest, remove via while-read
+        # shellcheck disable=SC2012
+        ls -t "$LOG_DIR"/cycle-*.log 2>/dev/null \
+            | tail -n "$to_remove" \
+            | while IFS= read -r _logfile; do rm -f "$_logfile"; done
     fi
 }
 
@@ -203,436 +348,148 @@ generate_cycle_id() {
         || echo "cycle-$(date +%s)-$$"
 }
 
-# ── Session Management ─────────────────────────────────────────────────────
-get_session_flag() {
-    case "$SESSION_MODE" in
-        fresh)
-            # Always start a new session
-            echo ""
-            ;;
-        continue)
-            # Always continue (if session file exists)
-            if [[ -f "$SESSION_FILE" ]]; then
-                local session_id
-                session_id=$(cat "$SESSION_FILE" 2>/dev/null)
-                if [[ -n "$session_id" ]]; then
-                    echo "--continue --session-id $session_id"
-                    return
-                fi
-            fi
-            echo ""
-            ;;
-        auto|*)
-            # Continue if session is fresh enough, otherwise start new
-            if [[ -f "$SESSION_FILE" ]]; then
-                local session_ts
-                session_ts=$(stat -c %Y "$SESSION_FILE" 2>/dev/null || echo 0)
-                local now_ts
-                now_ts=$(date +%s)
-                local age=$(( now_ts - session_ts ))
-
-                if [[ "$age" -lt "$SESSION_MAX_AGE" ]]; then
-                    local session_id
-                    session_id=$(cat "$SESSION_FILE" 2>/dev/null)
-                    if [[ -n "$session_id" ]]; then
-                        log "Reusing session (age=${age}s < ${SESSION_MAX_AGE}s)"
-                        echo "--continue --session-id $session_id"
-                        return
-                    fi
-                else
-                    log "Session expired (age=${age}s >= ${SESSION_MAX_AGE}s). Starting fresh."
-                    rm -f "$SESSION_FILE"
-                fi
-            fi
-            echo ""
-            ;;
-    esac
-}
-
-save_session_id() {
-    local output="$1"
-    # Claude CLI may output session ID — try to capture it
-    # The session ID is typically in the output or can be derived
-    # For now, use a hash of the first cycle as session marker
-    local session_id
-    session_id=$(echo "$output" | grep -oP 'session[_-]?id[=: ]+\K\S+' | head -1)
-    if [[ -z "$session_id" ]]; then
-        # Generate a stable session ID for this run
-        session_id="ralph-$$-$(date +%s)"
-    fi
-    echo "$session_id" > "$SESSION_FILE"
-}
-
-# ── Task Status Check (Supplementary) ──────────────────────────────────────
-# Reads task list state from ~/.claude/tasks/ for visibility.
-# This is SUPPLEMENTARY — stdout scanning for CYCLE_OK/CYCLE_FAIL/DONE
-# remains the primary cycle control mechanism.
-TASK_STATS_TOTAL=0
-TASK_STATS_COMPLETED=0
-TASK_STATS_PENDING=0
-TASK_STATS_IN_PROGRESS=0
-TASK_STATS_FAILED=0
-
-task_status_check() {
-    # Reset counters
-    TASK_STATS_TOTAL=0
-    TASK_STATS_COMPLETED=0
-    TASK_STATS_PENDING=0
-    TASK_STATS_IN_PROGRESS=0
-    TASK_STATS_FAILED=0
-
-    if [[ ! -d "$TASKS_DIR" ]]; then
-        echo "[tasks] Tasks directory not available" >&2
-        return 1
-    fi
-
-    # Look for JSON files matching our task list ID
-    local found=0
-    while IFS= read -r -d '' task_file; do
-        found=1
-        # Extract status fields using grep/jq-lite approach
-        # Task files are JSON; parse with python if available, else grep
-        if command -v python3 &>/dev/null; then
-            local counts
-            counts=$(python3 -c "
-import json, sys, glob, os
-
-tasks_dir = '$TASKS_DIR'
-list_id = '$RALPH_TASK_LIST_ID'
-total = completed = pending = in_progress = failed = 0
-
-for f in glob.glob(os.path.join(tasks_dir, '**', '*.json'), recursive=True):
-    try:
-        with open(f) as fh:
-            data = json.load(fh)
-        # Check if this task belongs to our list
-        tid = data.get('listId', '') or data.get('list_id', '') or ''
-        if tid != list_id and list_id not in str(data.get('id', '')):
-            continue
-        tasks = data.get('tasks', [data]) if isinstance(data, dict) else [data]
-        for t in tasks:
-            status = t.get('status', 'unknown')
-            total += 1
-            if status == 'completed': completed += 1
-            elif status == 'pending': pending += 1
-            elif status == 'in_progress': in_progress += 1
-            elif status == 'failed': failed += 1
-    except Exception:
-        pass
-
-print(f'{total} {completed} {pending} {in_progress} {failed}')
-" 2>/dev/null)
-            if [[ -n "$counts" ]]; then
-                read -r TASK_STATS_TOTAL TASK_STATS_COMPLETED TASK_STATS_PENDING TASK_STATS_IN_PROGRESS TASK_STATS_FAILED <<< "$counts"
-            fi
-            break  # python3 scans all files at once
-        else
-            # Fallback: simple grep-based counting (less accurate)
-            local status
-            status=$(grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' "$task_file" 2>/dev/null | head -1 | grep -o '"[^"]*"$' | tr -d '"')
-            TASK_STATS_TOTAL=$((TASK_STATS_TOTAL + 1))
-            case "$status" in
-                completed)   TASK_STATS_COMPLETED=$((TASK_STATS_COMPLETED + 1)) ;;
-                pending)     TASK_STATS_PENDING=$((TASK_STATS_PENDING + 1)) ;;
-                in_progress) TASK_STATS_IN_PROGRESS=$((TASK_STATS_IN_PROGRESS + 1)) ;;
-                failed)      TASK_STATS_FAILED=$((TASK_STATS_FAILED + 1)) ;;
-            esac
-        fi
-    done < <(find "$TASKS_DIR" -maxdepth 2 -name '*.json' -print0 2>/dev/null)
-
-    if [[ "$TASK_STATS_TOTAL" -gt 0 ]]; then
-        echo "[tasks] Task list '$RALPH_TASK_LIST_ID': total=$TASK_STATS_TOTAL completed=$TASK_STATS_COMPLETED pending=$TASK_STATS_PENDING in_progress=$TASK_STATS_IN_PROGRESS failed=$TASK_STATS_FAILED" >&2
-    else
-        echo "[tasks] No tasks found for list '$RALPH_TASK_LIST_ID'" >&2
-    fi
-    return 0
-}
-
-# ── Notifications ──────────────────────────────────────────────────────────
-notify() {
-    local event="$1"
-    local message="$2"
-    local timestamp
-    timestamp=$(date -Iseconds)
-    local file="$NOTIFY_DIR/${event}-${timestamp}.md"
-
-    cat > "$file" <<EOF
-# Notification: $event
-**Timestamp:** $timestamp
-**Project:** $PROJECT_PATH
-**Mode:** $MODE
-
-$message
-EOF
-
-    log "$message"
-}
-
-# ── Statistics Tracking ────────────────────────────────────────────────────
-STATS_START_TIME=$(date +%s)
-STATS_CYCLES_RUN=0
-STATS_CYCLES_OK=0
-STATS_CYCLES_FAIL=0
-STATS_CONSECUTIVE_FAILURES=0
-
-print_summary() {
-    local end_time
-    end_time=$(date +%s)
-    local duration=$(( end_time - STATS_START_TIME ))
-    local hours=$(( duration / 3600 ))
-    local minutes=$(( (duration % 3600) / 60 ))
-    local seconds=$(( duration % 60 ))
-
-    echo ""
-    echo -e "${BOLD}════════════════════════════════════════${NC}"
-    echo -e "${BOLD}  ralph.sh Session Summary${NC}"
-    echo -e "${BOLD}════════════════════════════════════════${NC}"
-    echo -e "  Version:     ${RALPH_VERSION}"
-    echo -e "  Project:     ${PROJECT_PATH}"
-    echo -e "  Mode:        ${MODE}"
-    echo -e "  Duration:    ${hours}h ${minutes}m ${seconds}s"
-    echo -e "  Cycles run:  ${STATS_CYCLES_RUN}"
-    echo -e "  ├─ OK:       ${GREEN}${STATS_CYCLES_OK}${NC}"
-    echo -e "  └─ Failed:   ${RED}${STATS_CYCLES_FAIL}${NC}"
-    echo -e "  Final phase: $(get_phase)"
-
-    # Task Management statistics (supplementary)
-    task_status_check 2>/dev/null
-    if [[ "$TASK_STATS_TOTAL" -gt 0 ]]; then
-        echo -e "  ────────────────────────────────────"
-        echo -e "  Tasks (${RALPH_TASK_LIST_ID}):"
-        echo -e "  ├─ Total:       ${TASK_STATS_TOTAL}"
-        echo -e "  ├─ Completed:   ${GREEN}${TASK_STATS_COMPLETED}${NC}"
-        echo -e "  ├─ Pending:     ${TASK_STATS_PENDING}"
-        echo -e "  ├─ In Progress: ${BLUE}${TASK_STATS_IN_PROGRESS}${NC}"
-        echo -e "  └─ Failed:      ${RED}${TASK_STATS_FAILED}${NC}"
-    fi
-
-    echo -e "${BOLD}════════════════════════════════════════${NC}"
-    echo ""
-}
-
-# ── Scan Claude Output ─────────────────────────────────────────────────────
-# Scans stdout for the LAST occurrence of CYCLE_OK, CYCLE_FAIL, or DONE.
-# Returns: "ok", "fail", "done", or "unknown"
-scan_cycle_result() {
-    local output_file="$1"
-
-    if [[ ! -s "$output_file" ]]; then
-        echo "unknown"
-        return
-    fi
-
-    # Scan from the end for the last occurrence of a cycle token
-    local last_token=""
-    while IFS= read -r line; do
-        case "$line" in
-            *DONE*)       last_token="done" ;;
-            *CYCLE_OK*)   last_token="ok" ;;
-            *CYCLE_FAIL*) last_token="fail" ;;
-        esac
-    done < "$output_file"
-
-    echo "${last_token:-unknown}"
-}
-
-# ── Run Claude Cycle ───────────────────────────────────────────────────────
-run_cycle() {
-    local cycle_id="$1"
-    local cycle_log="$2"
-    local local_iter="$3"
-    local phase="$4"
-
-    local session_flags
-    session_flags=$(get_session_flag)
-
-    local prompt="DEADF_CYCLE $cycle_id
-project: $PROJECT_PATH
-mode: $MODE
-Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DONE"
-
-    local output_file="$LOG_DIR/.cycle-output-$$"
-
-    log "Invoking claude --print (iter=$local_iter, phase=$phase, id=${cycle_id:0:8}...)"
-
-    # Enable native Task Management System and set shared task list ID
-    export CLAUDE_CODE_ENABLE_TASKS=1
-    export CLAUDE_CODE_TASK_LIST_ID="$RALPH_TASK_LIST_ID"
-
-    # Build command — use eval to handle session_flags which may be empty
-    local cmd="claude --print --allowedTools 'Read,Write,Edit,Bash,Task,Glob,Grep'"
-    if [[ -n "$session_flags" ]]; then
-        cmd="$cmd $session_flags"
-    fi
-
-    # Run with timeout
-    local exit_code=0
-    timeout "$CYCLE_TIMEOUT" bash -c "$cmd -p \"\$1\"" -- "$prompt" \
-        > "$output_file" 2>>"$cycle_log" || exit_code=$?
-
-    # Log the output
-    if [[ -f "$output_file" ]]; then
-        cat "$output_file" >> "$cycle_log"
-    fi
-
-    # Handle timeout (exit code 124)
-    if [[ "$exit_code" -eq 124 ]]; then
-        log_err "⏰ Cycle timeout after ${CYCLE_TIMEOUT}s"
-        echo "$(date -Iseconds) TIMEOUT after ${CYCLE_TIMEOUT}s" >> "$cycle_log"
-        set_cycle_timed_out
-        set_phase_needs_human
-        notify "timeout" "Cycle timed out after ${CYCLE_TIMEOUT}s at iteration $local_iter"
-        rm -f "$output_file"
-        echo "timeout"
-        return
-    fi
-
-    # Handle claude crash (nonzero exit, not timeout)
-    if [[ "$exit_code" -ne 0 ]]; then
-        log_warn "claude exited with code $exit_code"
-        echo "$(date -Iseconds) CLAUDE_EXIT_CODE=$exit_code" >> "$cycle_log"
-    fi
-
-    # Save session ID for potential reuse
-    if [[ -f "$output_file" ]]; then
-        save_session_id "$(cat "$output_file")"
-    fi
-
-    # Scan for cycle result token
-    local result
-    result=$(scan_cycle_result "$output_file")
-    rm -f "$output_file"
-
-    echo "$result"
-}
-
-# ── Main ───────────────────────────────────────────────────────────────────
-check_claude_version
+# ── Main Loop ──────────────────────────────────────────────────────────────
 acquire_lock
-
-log_ok "Starting ralph.sh v${RALPH_VERSION}"
-log "  project=$PROJECT_PATH mode=$MODE"
-log "  timeout=${CYCLE_TIMEOUT}s rate_limit=${RATE_LIMIT}s"
-log "  max_failures=$MAX_FAILURES session=$SESSION_MODE"
+log "Starting — project=$PROJECT_PATH mode=$MODE timeout=${CYCLE_TIMEOUT}s poll=${POLL_INTERVAL}s"
 
 # Read max iterations (with fallback)
 MAX_ITERATIONS=$(get_max_iter)
 [[ "$MAX_ITERATIONS" == "unknown" || "$MAX_ITERATIONS" == "null" ]] && MAX_ITERATIONS=200
+[[ "$MAX_ITERATIONS" =~ ^[0-9]+$ ]] || MAX_ITERATIONS=200
 log "Max iterations: $MAX_ITERATIONS"
 
-LAST_CYCLE_TIME=0
+RUNNING_WAITED=0
+DISPATCH_FAILURES=0
 
 while true; do
     # Check for shutdown between iterations
     [[ "$SHUTTING_DOWN" -eq 1 ]] && break
+
+    # Validate state is parseable each iteration
+    validate_state
 
     PHASE=$(get_phase)
     ITERATION=$(get_iteration)
 
     # ── Terminal conditions ──────────────────────────────────────────────
     if [[ "$PHASE" == "complete" ]]; then
-        log_ok "🎉 Pipeline complete at iteration $ITERATION"
-        notify "complete" "Pipeline completed successfully at iteration $ITERATION"
+        log "🎉 Pipeline complete at iteration $ITERATION"
         release_lock
-        print_summary
         exit 0
     fi
 
     if [[ "$PHASE" == "needs_human" ]]; then
-        log_warn "Needs human intervention. Pausing. (iteration=$ITERATION)"
-        notify "needs-human" "Pipeline paused — needs human intervention at iteration $ITERATION"
+        log "⚠️  Needs human intervention. Pausing. (iteration=$ITERATION)"
         release_lock
-        print_summary
         exit 1
     fi
 
-    if [[ "$ITERATION" != "unknown" && "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
-        log_err "🛑 Max iterations reached ($ITERATION >= $MAX_ITERATIONS)"
-        notify "max-iterations" "Max iterations reached ($ITERATION >= $MAX_ITERATIONS)"
+    if [[ "$ITERATION" =~ ^[0-9]+$ && "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
+        log "🛑 Max iterations reached ($ITERATION >= $MAX_ITERATIONS)"
         release_lock
-        print_summary
         exit 1
     fi
 
-    # ── Circuit breaker ──────────────────────────────────────────────────
-    if [[ "$STATS_CONSECUTIVE_FAILURES" -ge "$MAX_FAILURES" ]]; then
-        log_err "🔌 Circuit breaker: $STATS_CONSECUTIVE_FAILURES consecutive failures (limit=$MAX_FAILURES)"
-        set_phase_needs_human
-        notify "circuit-breaker" "Circuit breaker tripped: $STATS_CONSECUTIVE_FAILURES consecutive failures"
-        release_lock
-        print_summary
-        exit 1
+    # ── Wait if cycle already running (with timeout) ───────────────────
+    if [[ "$(get_cycle_status)" == "running" ]]; then
+        sleep "$POLL_INTERVAL"
+        RUNNING_WAITED=$((RUNNING_WAITED + POLL_INTERVAL))
+        log "Cycle already running. Waited ${RUNNING_WAITED}/${CYCLE_TIMEOUT}s"
+        if [[ "$RUNNING_WAITED" -ge "$CYCLE_TIMEOUT" ]]; then
+            log "⏰ Existing cycle timed out after ${CYCLE_TIMEOUT}s in running state"
+            require_state_update "cycle.status=timed_out" set_cycle_timed_out
+            require_state_update "phase=needs_human" set_phase_needs_human
+            release_lock
+            exit 1
+        fi
+        continue
     fi
-
-    # ── Rate limiting ────────────────────────────────────────────────────
-    NOW_TS=$(date +%s)
-    ELAPSED=$(( NOW_TS - LAST_CYCLE_TIME ))
-    if [[ "$LAST_CYCLE_TIME" -gt 0 && "$ELAPSED" -lt "$RATE_LIMIT" ]]; then
-        WAIT_TIME=$(( RATE_LIMIT - ELAPSED ))
-        log "Rate limit: waiting ${WAIT_TIME}s"
-        sleep "$WAIT_TIME"
-    fi
+    RUNNING_WAITED=0
 
     # ── Rotate logs before kicking new cycle ─────────────────────────────
     rotate_logs
 
     # ── Kick a new cycle ─────────────────────────────────────────────────
     CYCLE_ID=$(generate_cycle_id)
-    local_iter="${ITERATION:-0}"
+    local_iter="$ITERATION"
+    [[ "$local_iter" =~ ^[0-9]+$ ]] || local_iter=0
 
     log "── Cycle kick (iter=$local_iter, phase=$PHASE, id=${CYCLE_ID:0:8}...) ──"
 
     CYCLE_LOG="$LOG_DIR/cycle-${local_iter}.log"
-    echo "$(date -Iseconds) CYCLE_START id=$CYCLE_ID iter=$local_iter phase=$PHASE" >> "$CYCLE_LOG"
 
-    LAST_CYCLE_TIME=$(date +%s)
+    # Send cycle kick to orchestrator
+    CYCLE_MESSAGE="DEADF_CYCLE $CYCLE_ID
+project: $PROJECT_PATH
+mode: $MODE
+Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DONE"
 
-    # Run claude and get result
-    RESULT=$(run_cycle "$CYCLE_ID" "$CYCLE_LOG" "$local_iter" "$PHASE")
-    STATS_CYCLES_RUN=$((STATS_CYCLES_RUN + 1))
-
-    echo "$(date -Iseconds) RESULT=$RESULT" >> "$CYCLE_LOG"
-
-    # Post-cycle task status check (supplementary visibility)
-    task_status_check 2>> "$CYCLE_LOG"
-    if [[ "$TASK_STATS_TOTAL" -gt 0 ]]; then
-        echo "$(date -Iseconds) TASKS total=$TASK_STATS_TOTAL completed=$TASK_STATS_COMPLETED pending=$TASK_STATS_PENDING in_progress=$TASK_STATS_IN_PROGRESS failed=$TASK_STATS_FAILED" >> "$CYCLE_LOG"
+    "$TIMEOUT_CMD" "$DISPATCH_TIMEOUT" "${DISPATCH_CMD_ARR[@]}" "$CYCLE_MESSAGE" \
+        2>&1 | tee -a "$CYCLE_LOG"
+    dispatch_rc=${PIPESTATUS[0]}
+    if [[ "$dispatch_rc" -ne 0 ]]; then
+        log_err "Failed to send cycle kick (dispatch exit code: $dispatch_rc)"
+        echo "$(date -u -Iseconds) KICK_FAILED" >> "$CYCLE_LOG"
+        DISPATCH_FAILURES=$((DISPATCH_FAILURES + 1))
+        backoff=$(( DISPATCH_FAILURES * DISPATCH_FAILURES * 5 ))
+        [[ "$backoff" -gt 300 ]] && backoff=300
+        log "Dispatch failure #${DISPATCH_FAILURES}. Backing off ${backoff}s..."
+        if [[ "$DISPATCH_FAILURES" -ge 5 ]]; then
+            log_err "Too many consecutive dispatch failures ($DISPATCH_FAILURES). Giving up."
+            set_phase_needs_human
+            release_lock
+            exit 1
+        fi
+        sleep "$backoff"
+        continue
     fi
 
-    case "$RESULT" in
-        ok)
-            log_ok "✅ Cycle OK (iter=$local_iter)"
-            STATS_CYCLES_OK=$((STATS_CYCLES_OK + 1))
-            STATS_CONSECUTIVE_FAILURES=0
-            ;;
-        done)
-            log_ok "🎉 Pipeline reports DONE (iter=$local_iter)"
-            STATS_CYCLES_OK=$((STATS_CYCLES_OK + 1))
-            STATS_CONSECUTIVE_FAILURES=0
-            # Loop will check phase on next iteration and exit
-            ;;
-        fail)
-            log_warn "❌ Cycle failed (iter=$local_iter, consecutive=${STATS_CONSECUTIVE_FAILURES})"
-            STATS_CYCLES_FAIL=$((STATS_CYCLES_FAIL + 1))
-            STATS_CONSECUTIVE_FAILURES=$((STATS_CONSECUTIVE_FAILURES + 1))
-            ;;
-        timeout)
-            log_err "⏰ Cycle timed out — exiting"
-            STATS_CYCLES_FAIL=$((STATS_CYCLES_FAIL + 1))
+    # ── Wait for cycle completion ────────────────────────────────────────
+    WAITED=0
+    while true; do
+        sleep "$POLL_INTERVAL"
+        WAITED=$((WAITED + POLL_INTERVAL))
+
+        # Check for shutdown during wait
+        [[ "$SHUTTING_DOWN" -eq 1 ]] && break
+
+        # Re-validate state each poll
+        validate_state
+
+        CS=$(get_cycle_status)
+        PH=$(get_phase)
+
+        # Cycle completed normally
+        if [[ "$CS" == "complete" || "$CS" == "failed" || "$CS" == "idle" ]]; then
+            log "Cycle done (status=$CS, waited=${WAITED}s)"
+            break
+        fi
+
+        # Phase changed to terminal state
+        if [[ "$PH" == "complete" || "$PH" == "needs_human" ]]; then
+            log "Phase changed to $PH during cycle (waited=${WAITED}s)"
+            break
+        fi
+
+        # Timeout enforcement
+        if [[ "$WAITED" -ge "$CYCLE_TIMEOUT" ]]; then
+            log "⏰ Cycle timeout after ${CYCLE_TIMEOUT}s"
+            echo "$(date -u -Iseconds) TIMEOUT after ${CYCLE_TIMEOUT}s" >> "$CYCLE_LOG"
+            require_state_update "cycle.status=timed_out" set_cycle_timed_out
+            require_state_update "phase=needs_human" set_phase_needs_human
             release_lock
-            print_summary
             exit 1
-            ;;
-        unknown|*)
-            log_warn "⚠️  No valid cycle reply — treating as failure (iter=$local_iter)"
-            STATS_CYCLES_FAIL=$((STATS_CYCLES_FAIL + 1))
-            STATS_CONSECUTIVE_FAILURES=$((STATS_CONSECUTIVE_FAILURES + 1))
-            ;;
-    esac
+        fi
+    done
+
+    # Reset dispatch failure counter on successful cycle
+    DISPATCH_FAILURES=0
+
+    # Brief pause between cycles to avoid hammering
+    sleep 2
 done
 
 # If we exit the loop (shutdown flag), clean up
 release_lock
-print_summary
 log "Exited main loop."
 exit 130
