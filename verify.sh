@@ -185,6 +185,7 @@ check_lint() {
 check_diff() {
   local diff_lines=0
   local diff_ok=true
+  local numstat_output=""
 
   if ! command -v git &>/dev/null; then
     log "WARN: git not available, skipping diff check"
@@ -197,16 +198,23 @@ check_diff() {
 
   # Count diff lines vs parent commit
   if git rev-parse HEAD~1 &>/dev/null; then
-    diff_lines=$(git diff HEAD~1 --stat | tail -1 | grep -oP '\d+(?= insertion)' || echo "0")
-    local deletions
-    deletions=$(git diff HEAD~1 --stat | tail -1 | grep -oP '\d+(?= deletion)' || echo "0")
-    diff_lines=$((${diff_lines:-0} + ${deletions:-0}))
+    numstat_output=$(git diff --numstat HEAD~1 2>/dev/null || true)
   elif git rev-parse HEAD &>/dev/null; then
     # First commit — count all lines
-    diff_lines=$(git show --stat HEAD | tail -1 | grep -oP '\d+(?= insertion)' || echo "0")
-    local deletions
-    deletions=$(git show --stat HEAD | tail -1 | grep -oP '\d+(?= deletion)' || echo "0")
-    diff_lines=$((${diff_lines:-0} + ${deletions:-0}))
+    numstat_output=$(git show --numstat --format="" HEAD 2>/dev/null || true)
+  fi
+
+  if [[ -n "$numstat_output" ]]; then
+    local total=0
+    while IFS=$'\t' read -r added deleted _path; do
+      [[ -z "$added" && -z "$deleted" ]] && continue
+      [[ "$added" == "-" ]] && added=0
+      [[ "$deleted" == "-" ]] && deleted=0
+      [[ "$added" =~ ^[0-9]+$ ]] || added=0
+      [[ "$deleted" =~ ^[0-9]+$ ]] || deleted=0
+      total=$((total + added + deleted))
+    done <<< "$numstat_output"
+    diff_lines="$total"
   fi
 
   # Compare against ESTIMATED_DIFF from TASK.md if available

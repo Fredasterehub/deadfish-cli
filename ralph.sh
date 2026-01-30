@@ -446,6 +446,7 @@ Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DON
 
     # ── Wait for cycle completion ────────────────────────────────────────
     WAITED=0
+    SAW_RUNNING=0
     while true; do
         sleep "$POLL_INTERVAL"
         WAITED=$((WAITED + POLL_INTERVAL))
@@ -459,8 +460,16 @@ Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DON
         CS=$(get_cycle_status)
         PH=$(get_phase)
 
+        if [[ "$CS" == "running" ]]; then
+            SAW_RUNNING=1
+        fi
+
         # Cycle completed normally
-        if [[ "$CS" == "complete" || "$CS" == "failed" || "$CS" == "idle" ]]; then
+        if [[ "$CS" == "complete" || "$CS" == "failed" || "$CS" == "timed_out" ]]; then
+            log "Cycle done (status=$CS, waited=${WAITED}s)"
+            break
+        fi
+        if [[ "$CS" == "idle" && "$SAW_RUNNING" -eq 1 ]]; then
             log "Cycle done (status=$CS, waited=${WAITED}s)"
             break
         fi

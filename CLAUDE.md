@@ -168,7 +168,7 @@ Print to stdout exactly one of (must be the **LAST LINE** of output):
 - `CYCLE_FAIL` — action failed (will retry or escalate)
 - `DONE` — project complete (`phase: complete`)
 
-**ralph.sh scans stdout for these tokens.** They must appear as the final line.
+Ralph does **not** parse stdout tokens; it polls `STATE.yaml` (`cycle.status`/`phase`) to determine progress. The reply token is for operator logs and compatibility and should still be the final line.
 
 ---
 
@@ -556,6 +556,28 @@ The orchestrator uses these prefixes to skip LLM verification for `DET:` criteri
 
 Parse with: `python3 extract_plan.py --nonce <nonce> < raw_output`
 
+### TASK.md Format (verify.sh Contract)
+
+verify.sh only **requires**:
+- An `ESTIMATED_DIFF` line in either form: `ESTIMATED_DIFF=<int>` or `ESTIMATED_DIFF: <int>`
+- `FILES` list lines containing `path=<relative/path>` tokens (verify.sh extracts via `grep -oP 'path=\\K[^\\s]+'`)
+
+Recommended TASK.md template (matches the plan block fields):
+
+```
+TASK_ID=<bare>
+TITLE="<quoted>"
+SUMMARY=
+  <2-space indented multi-line>
+FILES:
+- path=<bare> action=<add|modify|delete> rationale="<quoted>"
+ACCEPTANCE:
+- id=AC<n> text="<quoted testable statement>"
+ESTIMATED_DIFF=<positive integer>
+```
+
+Only the `ESTIMATED_DIFF` line and `path=...` tokens are strictly required for verify.sh, but keep the full template for consistency and downstream tooling.
+
 ### Verdict Block Format
 
 ```
@@ -566,6 +588,18 @@ REASON="<single sentence>"
 ```
 
 Parse with: `python3 build_verdict.py --nonce <nonce> --criteria AC1,AC2,...`
+
+**build_verdict.py stdin format:**
+- JSON array of pairs: `[["AC1", "<raw response text>"], ["AC2", "<raw response text>"], ...]`
+- Each raw response string must contain **exactly one** sentinel verdict block for that criterion.
+
+Example:
+```
+[
+  ["AC1", "<<<VERDICT:V1:AC1:NONCE=AB12CD>>>\nANSWER=YES\nREASON=\"All tests pass\"\n<<<END_VERDICT:AC1:NONCE=AB12CD>>>"],
+  ["AC2", "<<<VERDICT:V1:AC2:NONCE=AB12CD>>>\nANSWER=NO\nREASON=\"Missing file\"\n<<<END_VERDICT:AC2:NONCE=AB12CD>>>"]
+]
+```
 
 ### Format-Repair Retry
 
@@ -736,24 +770,10 @@ Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DON
 ```
 
 **Key differences from pipeline version:**
-- `claude --print` outputs to stdout (ralph.sh captures and scans for cycle tokens)
+- `claude --print` outputs to stdout (ralph.sh captures for logging; state polling is authoritative)
 - `--allowedTools "Read,Write,Edit,Bash,Task,Glob,Grep"` enables full filesystem and exec access
 - `--continue` can be added for session persistence across cycles
 - No Discord dependency — all communication via stdout and filesystem
-
-### ralph.sh Token Scanning
-
-ralph.sh scans Claude Code's stdout for the cycle reply token:
-```bash
-# After claude --print completes:
-LAST_LINE=$(tail -1 "$OUTPUT_FILE")
-case "$LAST_LINE" in
-  *CYCLE_OK*)   echo "[ralph] Cycle OK" ;;
-  *CYCLE_FAIL*) echo "[ralph] Cycle failed" ;;
-  *DONE*)       echo "[ralph] Pipeline complete" ;;
-  *)            echo "[ralph] No valid reply — treating as fail" ;;
-esac
-```
 
 ---
 

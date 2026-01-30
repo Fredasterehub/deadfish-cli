@@ -147,10 +147,15 @@ def split_tokens(s: str, line: int | None = None) -> list[str]:
     return tokens
 
 
-def parse_item_kv(s: str, line: int | None = None) -> dict[str, str]:
+def parse_item_kv(
+    s: str,
+    line: int | None = None,
+    required_quoted_keys: set[str] | None = None,
+) -> dict[str, str]:
     """Parse a list item into key=value pairs with unescaped values."""
     tokens = split_tokens(s, line)
     result: dict[str, str] = {}
+    required_quoted_keys = required_quoted_keys or set()
     for tok in tokens:
         eq = tok.find('=')
         if eq < 0:
@@ -163,7 +168,9 @@ def parse_item_kv(s: str, line: int | None = None) -> dict[str, str]:
             )
         if key in result:
             raise ParseError(f"duplicate item key '{key}'", line)
-        val, _ = parse_value(raw_val, line)
+        val, is_quoted = parse_value(raw_val, line)
+        if key in required_quoted_keys and not is_quoted:
+            raise ParseError(f"{key} must be quoted", line)
         result[key] = val
     return result
 
@@ -195,13 +202,27 @@ def parse_payload(payload_lines: list[str]) -> dict[str, Any]:
 
     current_section: str | None = None
     pending_multiline: str | None = None
+    pending_multiline_line: int | None = None
     multiline_parts: list[str] = []
 
     def _flush_multiline() -> None:
-        nonlocal pending_multiline, multiline_parts
+        nonlocal pending_multiline, pending_multiline_line, multiline_parts
         if pending_multiline is not None:
-            fields[pending_multiline] = "\n".join(multiline_parts)
+            if pending_multiline == "SUMMARY":
+                if len(multiline_parts) == 0:
+                    raise ParseError(
+                        "SUMMARY must have at least one continuation line",
+                        pending_multiline_line,
+                    )
+            joined = "\n".join(multiline_parts)
+            if pending_multiline == "SUMMARY" and len(joined.strip()) == 0:
+                raise ParseError(
+                    "SUMMARY cannot be empty",
+                    pending_multiline_line,
+                )
+            fields[pending_multiline] = joined
             pending_multiline = None
+            pending_multiline_line = None
             multiline_parts = []
 
     for idx, raw_line in enumerate(payload_lines, start=1):
@@ -239,7 +260,7 @@ def parse_payload(payload_lines: list[str]) -> dict[str, Any]:
             if current_section == "FILES":
                 if len(raw_line) > 1000:
                     raise ParseError("FILES line exceeds 1000 chars", idx)
-                kv = parse_item_kv(item_text, idx)
+                kv = parse_item_kv(item_text, idx, required_quoted_keys={"rationale"})
                 unknown = set(kv.keys()) - FILES_REQUIRED_KEYS
                 if unknown:
                     raise ParseError(f"unknown FILES keys: {sorted(unknown)}", idx)
@@ -251,6 +272,8 @@ def parse_payload(payload_lines: list[str]) -> dict[str, Any]:
                     raise ParseError(
                         f"invalid action '{kv['action']}' (must be add/modify/delete)", idx
                     )
+                if "\n" in kv["rationale"] or "\r" in kv["rationale"]:
+                    raise ParseError("rationale must be single-line", idx)
                 if len(kv["rationale"]) > 300:
                     raise ParseError("rationale exceeds 300 chars", idx)
                 files_items.append(kv)
@@ -258,7 +281,7 @@ def parse_payload(payload_lines: list[str]) -> dict[str, Any]:
             elif current_section == "ACCEPTANCE":
                 if len(raw_line) > 600:
                     raise ParseError("ACCEPTANCE line exceeds 600 chars", idx)
-                kv = parse_item_kv(item_text, idx)
+                kv = parse_item_kv(item_text, idx, required_quoted_keys={"text"})
                 unknown = set(kv.keys()) - ACCEPTANCE_REQUIRED_KEYS
                 if unknown:
                     raise ParseError(f"unknown ACCEPTANCE keys: {sorted(unknown)}", idx)
@@ -271,6 +294,8 @@ def parse_payload(payload_lines: list[str]) -> dict[str, Any]:
                 text = kv["text"]
                 if len(text) == 0:
                     raise ParseError("acceptance text is empty", idx)
+                if "\n" in text or "\r" in text:
+                    raise ParseError("acceptance text must be single-line", idx)
                 if len(text) > 400:
                     raise ParseError("acceptance text exceeds 400 chars", idx)
                 # Check duplicate AC ids
@@ -319,13 +344,25 @@ def parse_payload(payload_lines: list[str]) -> dict[str, Any]:
             current_section = None
 
             # Check for multi-line start
+            if key == "SUMMARY":
+                if raw_val.strip() != '':
+                    raise ParseError("SUMMARY must be multi-line (use SUMMARY=)", idx)
+                pending_multiline = key
+                pending_multiline_line = idx
+                multiline_parts = []
+                continue
             if key in MULTILINE_FIELDS and raw_val.strip() == '':
                 pending_multiline = key
+                pending_multiline_line = idx
                 multiline_parts = []
                 continue
 
             # Parse value (bare or quoted)
             val, is_quoted = parse_value(raw_val, idx)
+            if key == "TITLE" and not is_quoted:
+                raise ParseError("TITLE must be quoted", idx)
+            if key in {"TASK_ID", "ESTIMATED_DIFF"} and is_quoted:
+                raise ParseError(f"{key} must be unquoted", idx)
             fields[key] = val
             continue
 
