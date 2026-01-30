@@ -87,7 +87,7 @@
 - **Quand:** Phase `select-track`, aucun track sélectionné
 - **Modèle:** GPT-5.2 via `codex exec`
 - **Concept:** Sélection du prochain track
-- **Status:** 🔲 À optimiser — **NEXT IN QUEUE**
+- **Status:** 🔲 À optimiser — **IN PROGRESS (next brainstorm session)**
 
 ### P4 — create_spec (Claude Code → GPT-5.2)
 - **Quand:** Phase `select-track`, track choisi mais pas de spec
@@ -142,7 +142,7 @@
 - **Modèle:** Claude sub-agents (dynamic count) for mapping, GPT-5.2 for doc generation
 - **Concept:** Transparent preflight that detects greenfield/brownfield/returning. For brownfield: scans repo (structure, deps, patterns, git history), generates machine-optimized living docs (TECH_STACK.md, PATTERNS.md, PITFALLS.md, etc.), runs interactive confirmation with operator, then seamlessly transitions into P2 brainstorm with enriched context. Both green and brownfield converge into same brainstorm entry point.
 - **Spec:** `memory/gsd-integration/FINAL_PLAN_v5.1.md`
-- **Status:** 🔲 À implémenter — **IN PROGRESS**
+- **Status:** ✅ Implemented + QA fixed (`a7a924b`)
 
 ---
 
@@ -181,8 +181,8 @@ Each session follows the structured flow:
 | # | Prompt | Status |
 |---|--------|--------|
 | 1 | P2 — seed_docs / Brainstorm Session | ✅ Implemented (`2653d4c`) |
-| 2 | P12 — Codebase Mapper / Brownfield | 🔄 In progress |
-| 3 | P3 — pick_track | 🔲 Next |
+| 2 | P12 — Codebase Mapper / Brownfield | ✅ Implemented + QA fixed (`a7a924b`) |
+| 3 | P3 — pick_track | 🔄 **NEXT** |
 | 4 | P4 — create_spec | 🔲 |
 | 5 | P5 — create_plan | 🔲 |
 | 6 | P6 — generate_task | 🔲 |
@@ -223,4 +223,4 @@ Run the optimized pipeline on a real project, verify improvements.
 | D | verify.sh JSON check clarified (exit 0 ≠ pass) | 🟡 Medium | ✅ |
 | E | Evidence bundles include ALL changed files | 🟡 Medium | ✅ |
 
-*Last updated: 2026-01-30 02:24 EST*
+*Last updated: 2026-01-30 14:30 EST*
