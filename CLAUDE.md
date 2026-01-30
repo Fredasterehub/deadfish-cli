@@ -68,7 +68,7 @@ This allows STATE.yaml context to carry across cycles without full reload overhe
 
 Use `--allowedTools` flag to restrict tool access for sub-agents when needed:
 ```bash
-claude --allowedTools "Read,Write,exec" --print "sub-agent prompt..."
+claude --allowedTools "Read,Write,Edit,Bash" --print "sub-agent prompt..."
 ```
 
 ---
@@ -79,7 +79,7 @@ When you receive `DEADF_CYCLE <cycle_id>`, execute these 6 steps in order:
 
 ### Step 1: LOAD
 
-Read these files (fail if any missing/unparseable):
+Read these files (fail if STATE.yaml or POLICY.yaml missing/unparseable):
 ```
 STATE.yaml          — current pipeline state
 POLICY.yaml         — mode behavior, thresholds
@@ -110,9 +110,9 @@ task.files_to_load  — files listed in STATE task.files_to_load (cap: <3000 tok
    cycle.started_at: <ISO-8601 timestamp>
    ```
 5. Check budgets:
-   - Time: if `now() - budget.started_at >= max_hours` → `phase: needs_human`, reply `CYCLE_FAIL`
+   - Time: if `now() - budget.started_at >= POLICY.escalation.max_hours` → `phase: needs_human`, reply `CYCLE_FAIL`
    - Iterations: checked by ralph.sh (not your concern)
-   - Budget 75% warning: if `now() - budget.started_at >= 0.75 * max_hours` → notify Fred per POLICY
+   - Budget 75% warning: if `now() - budget.started_at >= 0.75 * POLICY.escalation.max_hours` → notify Fred per POLICY
 
 ### Step 3: DECIDE
 
@@ -123,18 +123,18 @@ Read `phase` and `task.sub_step` from STATE.yaml. The action is deterministic.
 | # | Phase | Condition | Action |
 |---|-------|-----------|--------|
 | 1 | Any | Budget exceeded or state invalid | `escalate` |
-| 2 | `execute` | `loop.stuck_count >= stuck_threshold` AND `task.replan_attempted == true` | `escalate` |
-| 3 | `execute` | `loop.stuck_count >= stuck_threshold` AND `task.replan_attempted == false` | `replan_task` |
-| 4 | `execute` | `sub_step: implement` + `last_result.ok == false` + `task.retry_count >= task.max_retries` | `rollback_and_escalate` |
-| 5 | `execute` | `sub_step: implement` + `last_result.ok == false` + `task.retry_count < task.max_retries` | `retry_task` |
+| 2 | `execute` | `loop.stuck_count >= POLICY.escalation.stuck_threshold` AND `task.replan_attempted == true` | `escalate` |
+| 3 | `execute` | `loop.stuck_count >= POLICY.escalation.stuck_threshold` AND `task.replan_attempted == false` | `replan_task` |
+| 4 | `execute` | `task.sub_step: implement` + `last_result.ok == false` + `task.retry_count >= task.max_retries` | `rollback_and_escalate` |
+| 5 | `execute` | `task.sub_step: implement` + `last_result.ok == false` + `task.retry_count < task.max_retries` | `retry_task` |
 | 6 | `research` | — | `seed_docs` |
 | 7 | `select-track` | No track selected | `pick_track` |
 | 8 | `select-track` | Track selected, no spec | `create_spec` |
 | 9 | `select-track` | Spec exists, no plan | `create_plan` |
-| 10 | `execute` | `sub_step: null` or `generate` | `generate_task` |
-| 11 | `execute` | `sub_step: implement` | `implement_task` |
-| 12 | `execute` | `sub_step: verify` | `verify_task` |
-| 13 | `execute` | `sub_step: reflect` | `reflect` |
+| 10 | `execute` | `task.sub_step: null` or `generate` | `generate_task` |
+| 11 | `execute` | `task.sub_step: implement` | `implement_task` |
+| 12 | `execute` | `task.sub_step: verify` | `verify_task` |
+| 13 | `execute` | `task.sub_step: reflect` | `reflect` |
 | 14 | `complete` | — | `summarize` |
 
 **One cycle = one action. No chaining.**
@@ -199,7 +199,7 @@ Construct the GPT-5.2 planner prompt using the **layered prompt structure**:
 
 ```
 --- ORIENTATION (0a-0c) ---
-0a. Read STATE.yaml: current phase, track, task position, last_result, stuck_count.
+0a. Read STATE.yaml: current phase, track, task position, last_result, loop.stuck_count.
 0b. Read track spec and existing plan docs. Read OPS.md if present.
 0c. Search the codebase (`rg`, `find`) for existing implementations related to this track.
     Do NOT assume functionality is missing — confirm with code search first.
@@ -338,7 +338,7 @@ echo '<raw_responses_json>' | python3 build_verdict.py --nonce <nonce> --criteri
 
 On PASS: set `task.sub_step: reflect`, update `last_cycle.*`, set `last_result.ok: true`
 On FAIL: increment `task.retry_count`, set `task.sub_step: implement`, set `last_result.ok: false`
-  (Next cycle's DECIDE will read retry_count to choose `retry_task` vs `rollback_and_escalate`)
+  (Next cycle's DECIDE will read task.retry_count to choose `retry_task` vs `rollback_and_escalate`)
 On NEEDS_HUMAN: set `phase: needs_human` (all modes)
 
 ### `reflect` (execute phase)
@@ -365,12 +365,12 @@ On NEEDS_HUMAN: set `phase: needs_human` (all modes)
 
 ### `replan_task` (execute phase — stuck recovery)
 
-Triggered when `loop.stuck_count >= stuck_threshold` AND `task.replan_attempted == false`.
+Triggered when `loop.stuck_count >= POLICY.escalation.stuck_threshold` AND `task.replan_attempted == false`.
 
 1. Set `task.replan_attempted: true` in STATE.yaml
 2. Reset `loop.stuck_count: 0`, `task.retry_count: 0`
 3. Set `task.sub_step: generate` (re-enter task generation from scratch)
-4. Log: "Re-planning task {task.id} after {stuck_threshold} stuck cycles"
+4. Log: "Re-planning task {task.id} after {POLICY.escalation.stuck_threshold} stuck cycles"
 5. Reply `CYCLE_OK`
 
 The planner will regenerate the task spec with fresh context on the next cycle.
@@ -432,7 +432,7 @@ Each cycle step maps to Task operations:
 |------------|---------------|
 | **LOAD** | `TaskList` to check current state; `TaskGet` for active task details |
 | **VALIDATE** | `TaskUpdate` active task to `in_progress` |
-| **DECIDE** | Use task dependency graph to determine next action (blocked tasks are skipped) |
+| **DECIDE** | DECIDE is driven by phase + task.sub_step from STATE.yaml; Tasks only mirror/log progress and never determine the action |
 | **EXECUTE** | `TaskCreate` for sub-tasks if spawning sub-agents; sub-agents `TaskUpdate` when done |
 | **RECORD** | `TaskUpdate` with completion status (`completed`) |
 | **REPLY** | `TaskList` for final state summary |
@@ -463,7 +463,7 @@ When a step completes (`TaskUpdate(status: "completed")`), the next becomes unbl
 
 - `ralph.sh` sets `CLAUDE_CODE_TASK_LIST_ID` before invoking `claude`
 - Tasks persist in `~/.claude/tasks/` as JSON across sessions and context compaction
-- On resume: `TaskList` to see where we left off — no need to parse `STATE.yaml` for `sub_step`
+- On resume: `TaskList` to see where we left off — Tasks help resume quickly, but STATE.yaml remains authoritative for task.sub_step.
 
 ### 4. Multi-Session Coordination
 
@@ -583,9 +583,9 @@ If `extract_plan.py` or `build_verdict.py` exits 1:
 
 | Trigger | Condition | Action |
 |---------|-----------|--------|
-| Stuck (first) | `loop.stuck_count >= stuck_threshold` (default: 3) AND `task.replan_attempted == false` | **Re-plan**: regenerate task from scratch (see below) |
-| Stuck (after re-plan) | `loop.stuck_count >= stuck_threshold` AND `task.replan_attempted == true` | `phase: needs_human`, notify Fred |
-| Budget time | `now() - budget.started_at >= max_hours` | `phase: needs_human`, notify Fred |
+| Stuck (first) | `loop.stuck_count >= POLICY.escalation.stuck_threshold` (default: 3) AND `task.replan_attempted == false` | **Re-plan**: regenerate task from scratch (see below) |
+| Stuck (after re-plan) | `loop.stuck_count >= POLICY.escalation.stuck_threshold` AND `task.replan_attempted == true` | `phase: needs_human`, notify Fred |
+| Budget time | `now() - budget.started_at >= POLICY.escalation.max_hours` | `phase: needs_human`, notify Fred |
 | 3x task failure | `task.retry_count >= task.max_retries` | Rollback + `phase: needs_human` |
 | State invalid | STATE.yaml unparseable or schema mismatch | `phase: needs_human`, `CYCLE_FAIL` |
 | Parse failure | Actor output invalid after 1 retry | `CYCLE_FAIL` |
@@ -693,7 +693,7 @@ DEADF_CYCLE <cycle_id>
   │
   ├─ LOAD:     Read STATE.yaml + POLICY.yaml + task files
   ├─ VALIDATE: Parse state, derive nonce, set cycle.status=running, check budgets
-  ├─ DECIDE:   phase + sub_step → exactly one action
+  ├─ DECIDE:   phase + task.sub_step → exactly one action
   ├─ EXECUTE:  Run the action (dispatch to appropriate worker)
   ├─ RECORD:   Update STATE.yaml (always increment iteration)
   └─ REPLY:    CYCLE_OK | CYCLE_FAIL | DONE  (printed to stdout, last line)
