@@ -408,13 +408,11 @@ while true; do
 
     # ── P2 Brainstorm (research phase) ───────────────────────────────────
     if [[ "$PHASE" == "research" && ! -f "$PROJECT_PATH/.deadf/seed/P2_DONE" ]]; then
-        log "P2 brainstorm required — launching .pipe/p2-brainstorm.sh"
-        if ! "$PROJECT_PATH/.pipe/p2-brainstorm.sh" --project "$PROJECT_PATH"; then
-            log_err "P2 brainstorm runner failed"
+        log "P2 brainstorm required — launching .pipe/p12-init.sh"
+        if ! "$PROJECT_PATH/.pipe/p12-init.sh" --project "$PROJECT_PATH"; then
+            log_err "P12 init runner failed"
             set_phase_needs_human
-            notify "p2-brainstorm-failed" "P2 brainstorm runner failed. Run: .pipe/p2-brainstorm.sh --project \"$PROJECT_PATH\""
             release_lock
-            print_summary
             exit 1
         fi
     fi

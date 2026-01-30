@@ -182,11 +182,12 @@ Deterministic rule:
 1. If `.deadf/seed/P2_DONE` is missing **OR** `VISION.md`/`ROADMAP.md` are missing/empty:
    - set `phase: needs_human`
    - write a notification instructing the operator to run the P2 runner:
-     `.pipe/p2-brainstorm.sh --project "<project_root>"`
+     `.pipe/p12-init.sh --project "<project_root>"`
 2. If `P2_DONE` exists **and** both docs exist:
    - set `phase: select-track` (do not overwrite docs)
 
 Note: `.deadf/seed/` is the seed docs ledger directory.
+Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; treat missing marker as non-fatal and degrade gracefully (never fatal).
 
 ### `pick_track` (select-track phase)
 

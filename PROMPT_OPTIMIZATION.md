@@ -81,13 +81,13 @@
 - **Quand:** Phase `research`
 - **Modèle:** GPT-5.2 via `codex exec`
 - **Concept:** BMAD-style facilitated brainstorming session. AI is facilitator, human generates ideas. Structured flow: Session Setup → Technique Selection → Guided Ideation (anti-bias, domain shifts, 50-100+ ideas) → Organization (themes, prioritization) → Action Plans → seed docs (VISION.md / ROADMAP.md)
-- **Status:** 🔲 À optimiser — **FIRST IN QUEUE**
+- **Status:** ✅ Implemented (commit `2653d4c`)
 
 ### P3 — pick_track (Claude Code → GPT-5.2)
 - **Quand:** Phase `select-track`, aucun track sélectionné
 - **Modèle:** GPT-5.2 via `codex exec`
 - **Concept:** Sélection du prochain track
-- **Status:** 🔲 À optimiser (brainstorm)
+- **Status:** 🔲 À optimiser — **NEXT IN QUEUE**
 
 ### P4 — create_spec (Claude Code → GPT-5.2)
 - **Quand:** Phase `select-track`, track choisi mais pas de spec
@@ -137,6 +137,13 @@
 - **Concept:** Multi-model cross-validation
 - **Status:** 🔲 À optimiser (brainstorm)
 
+### P12 — Codebase Mapper / Brownfield Detection (Preflight → Claude Code sub-agents)
+- **Quand:** Phase `research`, before P2, when brownfield detected
+- **Modèle:** Claude sub-agents (dynamic count) for mapping, GPT-5.2 for doc generation
+- **Concept:** Transparent preflight that detects greenfield/brownfield/returning. For brownfield: scans repo (structure, deps, patterns, git history), generates machine-optimized living docs (TECH_STACK.md, PATTERNS.md, PITFALLS.md, etc.), runs interactive confirmation with operator, then seamlessly transitions into P2 brainstorm with enriched context. Both green and brownfield converge into same brainstorm entry point.
+- **Spec:** `memory/gsd-integration/FINAL_PLAN_v5.1.md`
+- **Status:** 🔲 À implémenter — **IN PROGRESS**
+
 ---
 
 ## Implementation Plan (Ralph Optimizations)
@@ -173,9 +180,9 @@ Each session follows the structured flow:
 
 | # | Prompt | Status |
 |---|--------|--------|
-| 1 | P2 — seed_docs / Brainstorm Session | 🔲 Next |
-| 2 | P1 — Cycle Kick | 🔲 |
-| 3 | P3 — pick_track | 🔲 |
+| 1 | P2 — seed_docs / Brainstorm Session | ✅ Implemented (`2653d4c`) |
+| 2 | P12 — Codebase Mapper / Brownfield | 🔄 In progress |
+| 3 | P3 — pick_track | 🔲 Next |
 | 4 | P4 — create_spec | 🔲 |
 | 5 | P5 — create_plan | 🔲 |
 | 6 | P6 — generate_task | 🔲 |
