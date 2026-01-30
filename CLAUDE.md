@@ -116,24 +116,26 @@ task.files_to_load  — files listed in STATE task.files_to_load (cap: <3000 tok
 
 ### Step 3: DECIDE
 
-Read `phase` and `task.sub_step` from STATE.yaml. The action is deterministic:
+Read `phase` and `task.sub_step` from STATE.yaml. The action is deterministic.
 
-| Phase | Condition | Action |
-|-------|-----------|--------|
-| `research` | — | `seed_docs` |
-| `select-track` | No track selected | `pick_track` |
-| `select-track` | Track selected, no spec | `create_spec` |
-| `select-track` | Spec exists, no plan | `create_plan` |
-| `execute` | `sub_step: null` or `generate` | `generate_task` |
-| `execute` | `sub_step: implement` | `implement_task` |
-| `execute` | `sub_step: verify` | `verify_task` |
-| `execute` | `sub_step: reflect` | `reflect` |
-| `execute` | `sub_step: implement` + `last_result.ok == false` + `retry_count < max_retries` | `retry_task` |
-| `execute` | `sub_step: implement` + `last_result.ok == false` + `retry_count >= max_retries` | `rollback_and_escalate` |
-| `complete` | — | `summarize` |
-| `execute` | `stuck_count >= stuck_threshold` AND `replan_attempted == false` | `replan_task` |
-| `execute` | `stuck_count >= stuck_threshold` AND `replan_attempted == true` | `escalate` |
-| Any | Budget exceeded, state invalid | `escalate` |
+**Precedence:** Evaluate rows top-to-bottom. The **first matching row wins.** Stuck/budget checks come first (highest priority), then specific failure conditions, then general sub_step fallbacks.
+
+| # | Phase | Condition | Action |
+|---|-------|-----------|--------|
+| 1 | Any | Budget exceeded or state invalid | `escalate` |
+| 2 | `execute` | `loop.stuck_count >= stuck_threshold` AND `task.replan_attempted == true` | `escalate` |
+| 3 | `execute` | `loop.stuck_count >= stuck_threshold` AND `task.replan_attempted == false` | `replan_task` |
+| 4 | `execute` | `sub_step: implement` + `last_result.ok == false` + `task.retry_count >= task.max_retries` | `rollback_and_escalate` |
+| 5 | `execute` | `sub_step: implement` + `last_result.ok == false` + `task.retry_count < task.max_retries` | `retry_task` |
+| 6 | `research` | — | `seed_docs` |
+| 7 | `select-track` | No track selected | `pick_track` |
+| 8 | `select-track` | Track selected, no spec | `create_spec` |
+| 9 | `select-track` | Spec exists, no plan | `create_plan` |
+| 10 | `execute` | `sub_step: null` or `generate` | `generate_task` |
+| 11 | `execute` | `sub_step: implement` | `implement_task` |
+| 12 | `execute` | `sub_step: verify` | `verify_task` |
+| 13 | `execute` | `sub_step: reflect` | `reflect` |
+| 14 | `complete` | — | `summarize` |
 
 **One cycle = one action. No chaining.**
 
@@ -211,8 +213,8 @@ Construct the GPT-5.2 planner prompt using the **layered prompt structure**:
 FILES minimization: Prefer ≤5 files unless strictly necessary.
   Every file must have a rationale tied to an acceptance criterion.
 Acceptance testability: Each ACn MUST be prefixed:
-  - "DET: ..." for criteria verifiable by deterministic checks (tests, lint, build, CLI output, file existence)
-  - "LLM: ..." for criteria requiring LLM judgment (code quality, design patterns, documentation tone)
+  - "DET: ..." for criteria covered by verify.sh's 6 checks ONLY (tests pass, lint pass, diff within 3×estimate, no blocked paths, no secrets, git clean)
+  - "LLM: ..." for everything else (code quality, design patterns, documentation tone, file existence, specific content, CLI output matching)
 ESTIMATED_DIFF calibration: Estimate smallest plausible implementation.
   If estimate >200 lines, split into multiple tasks.
 
@@ -292,7 +294,7 @@ If `verify.sh.pass == false` → FAIL immediately. Do NOT run LLM verifier.
 
 **Stage 2: LLM verification (only if verify.sh passes)**
 
-**DET:/LLM: Skip Logic:** Acceptance criteria prefixed with `DET:` are verified ONLY by verify.sh + deterministic artifacts (test output, file existence, CLI output). Do NOT spawn LLM verifiers for `DET:` criteria — auto-pass them if verify.sh passed. Only spawn LLM sub-agents for `LLM:` prefixed criteria.
+**DET:/LLM: Skip Logic:** Acceptance criteria prefixed with `DET:` are auto-passed when verify.sh reports `"pass": true` — they map exclusively to verify.sh's 6 checks. Do NOT spawn LLM verifiers for `DET:` criteria. Only spawn LLM sub-agents for `LLM:` prefixed criteria.
 
 For each `LLM:` acceptance criterion:
 1. Build a **per-criterion evidence bundle** (minimal context):
@@ -363,7 +365,7 @@ On NEEDS_HUMAN: set `phase: needs_human` (all modes)
 
 ### `replan_task` (execute phase — stuck recovery)
 
-Triggered when `stuck_count >= stuck_threshold` AND `replan_attempted == false`.
+Triggered when `loop.stuck_count >= stuck_threshold` AND `task.replan_attempted == false`.
 
 1. Set `task.replan_attempted: true` in STATE.yaml
 2. Reset `loop.stuck_count: 0`, `task.retry_count: 0`
@@ -581,18 +583,18 @@ If `extract_plan.py` or `build_verdict.py` exits 1:
 
 | Trigger | Condition | Action |
 |---------|-----------|--------|
-| Stuck (first) | `stuck_count >= stuck_threshold` (default: 3) AND `replan_attempted == false` | **Re-plan**: regenerate task from scratch (see below) |
-| Stuck (after re-plan) | `stuck_count >= stuck_threshold` AND `replan_attempted == true` | `phase: needs_human`, notify Fred |
+| Stuck (first) | `loop.stuck_count >= stuck_threshold` (default: 3) AND `task.replan_attempted == false` | **Re-plan**: regenerate task from scratch (see below) |
+| Stuck (after re-plan) | `loop.stuck_count >= stuck_threshold` AND `task.replan_attempted == true` | `phase: needs_human`, notify Fred |
 | Budget time | `now() - budget.started_at >= max_hours` | `phase: needs_human`, notify Fred |
-| 3x task failure | `task.retry_count >= max_retries` | Rollback + `phase: needs_human` |
+| 3x task failure | `task.retry_count >= task.max_retries` | Rollback + `phase: needs_human` |
 | State invalid | STATE.yaml unparseable or schema mismatch | `phase: needs_human`, `CYCLE_FAIL` |
 | Parse failure | Actor output invalid after 1 retry | `CYCLE_FAIL` |
 
 ### Plan Disposability (Re-plan Before Escalate)
 
 When stuck detection triggers for the first time on a task:
-1. Set `replan_attempted: true` in STATE.yaml
-2. Reset `stuck_count: 0`, `task.retry_count: 0`
+1. Set `task.replan_attempted: true` in STATE.yaml
+2. Reset `loop.stuck_count: 0`, `task.retry_count: 0`
 3. Set `task.sub_step: generate` (re-enter task generation)
 4. The planner will regenerate the task spec from scratch with fresh context
 5. If stuck triggers again after re-plan → escalate to `needs_human`
