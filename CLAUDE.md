@@ -174,11 +174,19 @@ Ralph does **not** parse stdout tokens; it polls `STATE.yaml` (`cycle.status`/`p
 
 ## Action Specifications
 
-### `seed_docs` (research phase)
+### `seed_docs` (research phase) — P2 Brainstorm Session
 
-1. Read project files, understand codebase structure
-2. Generate initial documentation (VISION.md, ROADMAP.md if not present)
-3. Set `phase: select-track`
+This phase is **human-driven**. Claude Code must **NOT** generate seed docs automatically.
+
+Deterministic rule:
+1. If `.deadf/seed/P2_DONE` is missing **OR** `VISION.md`/`ROADMAP.md` are missing/empty:
+   - set `phase: needs_human`
+   - write a notification instructing the operator to run the P2 runner:
+     `.pipe/p2-brainstorm.sh --project "<project_root>"`
+2. If `P2_DONE` exists **and** both docs exist:
+   - set `phase: select-track` (do not overwrite docs)
+
+Note: `.deadf/seed/` is the seed docs ledger directory.
 
 ### `pick_track` (select-track phase)
 

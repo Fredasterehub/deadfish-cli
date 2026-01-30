@@ -10,25 +10,62 @@
 2. Rechercher Ralph Wiggum (original + forks) ✅
 3. GPT-5.2 analyse comparative ✅
 4. Synthèse et plan d'adoption ✅
-5. Implémenter les optimisations (EN COURS)
-6. Brainstorm prompt-par-prompt (À FAIRE)
+5. Implémenter les optimisations Ralph (Phase 1 + 1.5) ✅
+6. Brainstorm prompt-par-prompt — BMAD-style facilitated sessions (EN COURS)
 
 ## Recherche Complétée
 
-### Sources analysées
+### Reference Frameworks (Fred's directive — priority order)
+
+#### 🏆 GSD (Get Shit Done) — MAIN REFERENCE for optimal prompts
+- **Source:** `/tank/dump/DEV/prompt-research/gsd/`
+- **Key patterns adopted:**
+  1. **Plans ARE prompts** — no transformation step between plan and execution prompt
+  2. **Context quality degrades at 50%+ usage** — aggressive atomicity (2-3 tasks per plan)
+  3. **Goal-backward verification** — check truths, not task completion
+  4. **Three-level artifact checks** — exists → substantive → wired
+  5. **Deviation rules with priority escalation**
+  6. **Task sizing for Codex** — GPT-5.2 planner must structure everything knowing Codex needs atomic 2-3 task chunks that complete within 50% context
+
+#### 🧠 BMAD — Brainstorm methodology
+- **Source:** `/tank/dump/DEV/prompt-research/bmad/`
+- **Used for:** Interactive brainstorm phase (P2 seed_docs) — one-time session with operator
+- **Key principles:**
+  1. **Facilitator, not generator** — ideas come from the human, AI guides exploration
+  2. **Anti-semantic-clustering** — consciously shift creative domains every ~10 ideas
+  3. **Quantity over quality first** — first 20 ideas are obvious, magic at 50-100+
+  4. **Generative mode as long as possible** — resist organizing too early
+  5. **60+ creativity techniques** available for guided ideation
+  6. **Anti-bias protocols** — prevent anchoring, groupthink, recency bias
+
+#### 🎼 Google Conductor — Dynamic task generation & context persistence
+- **Source:** `/tank/dump/DEV/prompt-research/conductor/`
+- **Used for:** Task generation (P6), evaluation patterns, context persistence across cycles
+
+### Analysis Documents
+- **Opus analysis:** `/tank/dump/DEV/prompt-research/ANALYSIS.md` (31KB — read 30+ files across all 3 frameworks)
+- **GPT-5.2 analysis:** `/tank/dump/DEV/prompt-research/GPT52-ANALYSIS.md` (22KB — focused on prompt architecture patterns)
+
+### Ralph Wiggum Sources (Phase 1 research)
 - **snarktank/ralph** — Ryan Carson (PRD-driven, prd.json, progress.txt, AGENTS.md)
 - **vercel-labs/ralph-loop-agent** — Vercel SDK (verifyCompletion, stop conditions)
 - **ClaytonFarr/ralph-playbook** — PROMPT_plan.md + PROMPT_build.md (0a-0d / 1-4 / 999+ pattern)
 - **ghuntley/how-to-ralph-wiggum** — Geoffrey Huntley (original philosophy)
 - **GPT-5.2 analyse complète** — `/tmp/ralph-analysis.md` (148 lignes)
 
-### Insights clés adoptés de Ralph
+### Insights clés adoptés de Ralph (Phase 1)
 1. **Layered prompt structure** (0a-0d orientation / 1-4 main / 999+ guardrails)
 2. **Backpressure earlier** (implementer runs verify.sh before commit)
 3. **DET:/LLM: acceptance tagging** (skip LLM verifiers for deterministic criteria)
 4. **Plan disposability** (re-plan before escalate)
 5. **Evidence bundles** (minimal context per verifier sub-agent)
 6. **OPS.md pattern** (split operational cache from CLAUDE.md contract)
+
+### Key Design Decisions from Research
+- **Brainstorming is ONE-TIME** interactive phase with operator, not a per-prompt template
+- **After brainstorm, pipeline rolls autonomously** (only approval gates at vision/roadmap)
+- **GPT-5.2-Codex needs super small, extremely well-defined tasks** → planner must optimize for Codex's granular digestion
+- **GSD's plans-as-prompts** is strictly better than our current transform-then-execute pattern
 
 ---
 
@@ -40,11 +77,11 @@
 - **Concept:** Trigger mécanique minimal, CLAUDE.md fait le vrai travail
 - **Status:** 🔲 À optimiser (Ralph insights: idempotent, cd constraint, reply token constraint)
 
-### P2 — seed_docs (Claude Code → GPT-5.2)
+### P2 — seed_docs / Brainstorm Session (Claude Code → GPT-5.2)
 - **Quand:** Phase `research`
 - **Modèle:** GPT-5.2 via `codex exec`
-- **Concept:** Exploration libre, génère VISION.md / ROADMAP.md
-- **Status:** 🔲 À optimiser (brainstorm)
+- **Concept:** BMAD-style facilitated brainstorming session. AI is facilitator, human generates ideas. Structured flow: Session Setup → Technique Selection → Guided Ideation (anti-bias, domain shifts, 50-100+ ideas) → Organization (themes, prioritization) → Action Plans → seed docs (VISION.md / ROADMAP.md)
+- **Status:** 🔲 À optimiser — **FIRST IN QUEUE**
 
 ### P3 — pick_track (Claude Code → GPT-5.2)
 - **Quand:** Phase `select-track`, aucun track sélectionné
@@ -115,8 +152,38 @@
 | 5 | Evidence bundles pour P9 verifiers | 🟡 Moyen | Moyen | ✅ |
 | 6 | OPS.md pattern (split CLAUDE.md) | 🟢 Faible | Faible | ✅ |
 
-### Phase 2: Per-Prompt Brainstorm (NEXT)
-Go through P1 → P11 one by one, brainstorm with Fred, optimize each.
+### Phase 2: Per-Prompt Brainstorm (CURRENT)
+
+BMAD-style facilitated sessions with Fred, one prompt at a time.
+Each session follows the structured flow:
+
+1. **Session Setup** — define the prompt's purpose, goals, constraints, current gaps
+2. **Technique Selection** — pick ideation approach (user-selected, AI-recommended, random, progressive)
+3. **Technique Execution** — guided ideation with creativity techniques, anti-bias protocols, anti-semantic-clustering (domain shift every ~10 ideas), quantity over quality (push past obvious 20 → aim for 50-100+)
+4. **Idea Organization** — theming & prioritization (ONLY after generative phase exhausted)
+5. **Action Plans** — top ideas become concrete prompt changes
+
+**Key principles:**
+- AI = facilitator, not generator. Ideas come from Fred, AI guides exploration.
+- Stay in generative mode as long as possible. Resist organizing too early.
+- Anti-semantic-clustering: consciously shift creative domains to avoid 50 variations of the same concept.
+- First 20 ideas are obvious. Magic happens at 50-100.
+
+**Review order:**
+
+| # | Prompt | Status |
+|---|--------|--------|
+| 1 | P2 — seed_docs / Brainstorm Session | 🔲 Next |
+| 2 | P1 — Cycle Kick | 🔲 |
+| 3 | P3 — pick_track | 🔲 |
+| 4 | P4 — create_spec | 🔲 |
+| 5 | P5 — create_plan | 🔲 |
+| 6 | P6 — generate_task | 🔲 |
+| 7 | P7 — implement_task | 🔲 |
+| 8 | P9 — LLM Verification | 🔲 |
+| 9 | P10 — Format-Repair Retry | 🔲 |
+| 10 | P11 — QA Review | 🔲 |
+| — | P8 — verify.sh | ✅ Already solid |
 
 ### Phase 3: Integration Testing
 Run the optimized pipeline on a real project, verify improvements.
@@ -132,6 +199,10 @@ Run the optimized pipeline on a real project, verify improvements.
 | 2026-01-29 | Keep verify.sh as primary gate | deadf(ish) deterministic verification is strictly better than Ralph's generic "run tests" |
 | 2026-01-29 | Add self-backpressure to Codex | Ralph's key insight: implementer should validate before handing off |
 | 2026-01-29 | GPT-5.2 NO TIMEOUT rule | Fred directive: GPT-5.2 is slow, that's normal. Never set timeouts. |
+| 2026-01-30 | GSD = main prompt reference | GSD's plans-as-prompts, context budgets, aggressive atomicity are the primary patterns |
+| 2026-01-30 | BMAD = brainstorm methodology only | One-time interactive facilitation for P2 seed_docs, not a per-prompt template |
+| 2026-01-30 | Conductor = task generation/context persistence | Informs P6 (generate_task) and cross-cycle context management |
+| 2026-01-30 | Brainstorm is interactive with Fred | BMAD-style facilitated sessions, not automated — AI facilitates, Fred generates ideas |
 
 ---
 
@@ -145,4 +216,4 @@ Run the optimized pipeline on a real project, verify improvements.
 | D | verify.sh JSON check clarified (exit 0 ≠ pass) | 🟡 Medium | ✅ |
 | E | Evidence bundles include ALL changed files | 🟡 Medium | ✅ |
 
-*Last updated: 2026-01-29 21:15 EST*
+*Last updated: 2026-01-30 02:24 EST*
