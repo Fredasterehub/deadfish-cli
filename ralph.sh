@@ -44,6 +44,10 @@ SESSION_FILE="$PROJECT_PATH/.deadf/.claude_session_id"
 SESSION_MAX_AGE="${RALPH_SESSION_MAX_AGE:-3600}" # Session expiry in seconds (1hr)
 MIN_CLAUDE_VERSION="${RALPH_MIN_CLAUDE:-1.0.0}"  # Minimum claude CLI version
 
+# Task Management configuration (supplementary — does not replace stdout scanning)
+RALPH_TASK_LIST_ID="${RALPH_TASK_LIST_ID:-"deadf-$(basename "$PROJECT_PATH")"}"
+TASKS_DIR="${HOME}/.claude/tasks"
+
 # ── Color Output ───────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
     RED='\033[0;31m'
@@ -66,6 +70,13 @@ mkdir -p "$NOTIFY_DIR" || { echo -e "${RED}[ralph] ERROR: Cannot create notify d
 
 command -v yq &>/dev/null    || { echo -e "${RED}[ralph] ERROR: yq required but not found${NC}" >&2; exit 1; }
 command -v claude &>/dev/null || { echo -e "${RED}[ralph] ERROR: claude CLI required but not found${NC}" >&2; exit 1; }
+
+# Task Management preflight (supplementary — warn only, never fail)
+if [[ -d "$TASKS_DIR" ]]; then
+    echo -e "${GREEN}[ralph]${NC} Tasks directory accessible: $TASKS_DIR"
+else
+    echo -e "${YELLOW}[ralph]${NC} ⚠️  Tasks directory not found: $TASKS_DIR (Task Management is supplementary — continuing)"
+fi
 
 # ── Claude CLI Version Check ──────────────────────────────────────────────
 check_claude_version() {
@@ -252,6 +263,91 @@ save_session_id() {
     echo "$session_id" > "$SESSION_FILE"
 }
 
+# ── Task Status Check (Supplementary) ──────────────────────────────────────
+# Reads task list state from ~/.claude/tasks/ for visibility.
+# This is SUPPLEMENTARY — stdout scanning for CYCLE_OK/CYCLE_FAIL/DONE
+# remains the primary cycle control mechanism.
+TASK_STATS_TOTAL=0
+TASK_STATS_COMPLETED=0
+TASK_STATS_PENDING=0
+TASK_STATS_IN_PROGRESS=0
+TASK_STATS_FAILED=0
+
+task_status_check() {
+    # Reset counters
+    TASK_STATS_TOTAL=0
+    TASK_STATS_COMPLETED=0
+    TASK_STATS_PENDING=0
+    TASK_STATS_IN_PROGRESS=0
+    TASK_STATS_FAILED=0
+
+    if [[ ! -d "$TASKS_DIR" ]]; then
+        echo "[tasks] Tasks directory not available" >&2
+        return 1
+    fi
+
+    # Look for JSON files matching our task list ID
+    local found=0
+    while IFS= read -r -d '' task_file; do
+        found=1
+        # Extract status fields using grep/jq-lite approach
+        # Task files are JSON; parse with python if available, else grep
+        if command -v python3 &>/dev/null; then
+            local counts
+            counts=$(python3 -c "
+import json, sys, glob, os
+
+tasks_dir = '$TASKS_DIR'
+list_id = '$RALPH_TASK_LIST_ID'
+total = completed = pending = in_progress = failed = 0
+
+for f in glob.glob(os.path.join(tasks_dir, '**', '*.json'), recursive=True):
+    try:
+        with open(f) as fh:
+            data = json.load(fh)
+        # Check if this task belongs to our list
+        tid = data.get('listId', '') or data.get('list_id', '') or ''
+        if tid != list_id and list_id not in str(data.get('id', '')):
+            continue
+        tasks = data.get('tasks', [data]) if isinstance(data, dict) else [data]
+        for t in tasks:
+            status = t.get('status', 'unknown')
+            total += 1
+            if status == 'completed': completed += 1
+            elif status == 'pending': pending += 1
+            elif status == 'in_progress': in_progress += 1
+            elif status == 'failed': failed += 1
+    except Exception:
+        pass
+
+print(f'{total} {completed} {pending} {in_progress} {failed}')
+" 2>/dev/null)
+            if [[ -n "$counts" ]]; then
+                read -r TASK_STATS_TOTAL TASK_STATS_COMPLETED TASK_STATS_PENDING TASK_STATS_IN_PROGRESS TASK_STATS_FAILED <<< "$counts"
+            fi
+            break  # python3 scans all files at once
+        else
+            # Fallback: simple grep-based counting (less accurate)
+            local status
+            status=$(grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' "$task_file" 2>/dev/null | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+            TASK_STATS_TOTAL=$((TASK_STATS_TOTAL + 1))
+            case "$status" in
+                completed)   TASK_STATS_COMPLETED=$((TASK_STATS_COMPLETED + 1)) ;;
+                pending)     TASK_STATS_PENDING=$((TASK_STATS_PENDING + 1)) ;;
+                in_progress) TASK_STATS_IN_PROGRESS=$((TASK_STATS_IN_PROGRESS + 1)) ;;
+                failed)      TASK_STATS_FAILED=$((TASK_STATS_FAILED + 1)) ;;
+            esac
+        fi
+    done < <(find "$TASKS_DIR" -maxdepth 2 -name '*.json' -print0 2>/dev/null)
+
+    if [[ "$TASK_STATS_TOTAL" -gt 0 ]]; then
+        echo "[tasks] Task list '$RALPH_TASK_LIST_ID': total=$TASK_STATS_TOTAL completed=$TASK_STATS_COMPLETED pending=$TASK_STATS_PENDING in_progress=$TASK_STATS_IN_PROGRESS failed=$TASK_STATS_FAILED" >&2
+    else
+        echo "[tasks] No tasks found for list '$RALPH_TASK_LIST_ID'" >&2
+    fi
+    return 0
+}
+
 # ── Notifications ──────────────────────────────────────────────────────────
 notify() {
     local event="$1"
@@ -299,6 +395,19 @@ print_summary() {
     echo -e "  ├─ OK:       ${GREEN}${STATS_CYCLES_OK}${NC}"
     echo -e "  └─ Failed:   ${RED}${STATS_CYCLES_FAIL}${NC}"
     echo -e "  Final phase: $(get_phase)"
+
+    # Task Management statistics (supplementary)
+    task_status_check 2>/dev/null
+    if [[ "$TASK_STATS_TOTAL" -gt 0 ]]; then
+        echo -e "  ────────────────────────────────────"
+        echo -e "  Tasks (${RALPH_TASK_LIST_ID}):"
+        echo -e "  ├─ Total:       ${TASK_STATS_TOTAL}"
+        echo -e "  ├─ Completed:   ${GREEN}${TASK_STATS_COMPLETED}${NC}"
+        echo -e "  ├─ Pending:     ${TASK_STATS_PENDING}"
+        echo -e "  ├─ In Progress: ${BLUE}${TASK_STATS_IN_PROGRESS}${NC}"
+        echo -e "  └─ Failed:      ${RED}${TASK_STATS_FAILED}${NC}"
+    fi
+
     echo -e "${BOLD}════════════════════════════════════════${NC}"
     echo ""
 }
@@ -345,6 +454,9 @@ Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DON
     local output_file="$LOG_DIR/.cycle-output-$$"
 
     log "Invoking claude --print (iter=$local_iter, phase=$phase, id=${cycle_id:0:8}...)"
+
+    # Export task list ID so claude and its sub-agents share the same task list
+    export CLAUDE_CODE_TASK_LIST_ID="$RALPH_TASK_LIST_ID"
 
     # Build command — use eval to handle session_flags which may be empty
     local cmd="claude --print --allowedTools 'Read,Write,Edit,Bash,Task,Glob,Grep'"
@@ -479,6 +591,12 @@ while true; do
     STATS_CYCLES_RUN=$((STATS_CYCLES_RUN + 1))
 
     echo "$(date -Iseconds) RESULT=$RESULT" >> "$CYCLE_LOG"
+
+    # Post-cycle task status check (supplementary visibility)
+    task_status_check 2>> "$CYCLE_LOG"
+    if [[ "$TASK_STATS_TOTAL" -gt 0 ]]; then
+        echo "$(date -Iseconds) TASKS total=$TASK_STATS_TOTAL completed=$TASK_STATS_COMPLETED pending=$TASK_STATS_PENDING in_progress=$TASK_STATS_IN_PROGRESS failed=$TASK_STATS_FAILED" >> "$CYCLE_LOG"
+    fi
 
     case "$RESULT" in
         ok)
