@@ -69,6 +69,22 @@
 
 ---
 
+## End-to-End Lifecycle Status
+
+| Phase | What It Does | Components | Status |
+|-------|-------------|------------|--------|
+| **1. INIT (P12)** | Detect green/brown/returning, map codebase → living docs, confirm with operator | `p12-init.sh`, `P12_DETECT.sh`, `P12_COLLECT.sh`, `P12_MAP.sh`, `P12_CONFIRM.sh`, `P12_INJECT.sh`, 3 prompts, budget checker | ✅ Implemented |
+| **2. RESEARCH (P2)** | BMAD brainstorm → VISION.md + ROADMAP.md | `p2-brainstorm.sh`, P2_MAIN + P2_A through P2_G (9 prompts) | ✅ Implemented |
+| **3. SELECT-TRACK (P3-P5)** | Pick track, create spec, create plan (sentinel DSL) | Contract in CLAUDE.md | ⚠️ Contract only |
+| **4. EXECUTE (P6-P7)** | Generate task, implement (Codex), self-backpressure verify | Contract in CLAUDE.md | ⚠️ Contract only |
+| **5. VERIFY (P8-P9)** | Deterministic checks (bash) + LLM verification (sub-agents) | `verify.sh` (P8) | ✅ P8 implemented / ⚠️ P9 contract only |
+| **6. REFLECT** | Commit/retry/replan/escalate, track completion | Contract in CLAUDE.md | ⚠️ Contract only |
+| **SUPPORT** | Loop controller, parsers, state, policy | `ralph.sh`, `extract_plan.py`, `build_verdict.py`, `CLAUDE.md`, `STATE.yaml`, `POLICY.yaml` | ✅ All implemented |
+
+*Updated as prompts are optimized. "Contract only" = logic defined in CLAUDE.md but no dedicated prompt templates or scripts yet.*
+
+---
+
 ## Prompt Inventory
 
 ### P1 — Cycle Kick (ralph.sh → Claude Code)
