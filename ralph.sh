@@ -455,7 +455,8 @@ Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DON
 
     log "Invoking claude --print (iter=$local_iter, phase=$phase, id=${cycle_id:0:8}...)"
 
-    # Export task list ID so claude and its sub-agents share the same task list
+    # Enable native Task Management System and set shared task list ID
+    export CLAUDE_CODE_ENABLE_TASKS=1
     export CLAUDE_CODE_TASK_LIST_ID="$RALPH_TASK_LIST_ID"
 
     # Build command — use eval to handle session_flags which may be empty
