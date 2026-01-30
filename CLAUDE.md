@@ -325,6 +325,92 @@ phase: needs_human
 
 ---
 
+## Task Management Integration
+
+Claude Code's native Task Management System (TaskCreate/TaskGet/TaskUpdate/TaskList) provides persistent workflow tracking with dependency graphs. Tasks complement STATE.yaml — they track the *how* while STATE.yaml tracks the *what*.
+
+### 1. Task-Enhanced Cycle Protocol
+
+Each cycle step maps to Task operations:
+
+| Cycle Step | Task Operation |
+|------------|---------------|
+| **LOAD** | `TaskList` to check current state; `TaskGet` for active task details |
+| **VALIDATE** | `TaskUpdate` active task to `in_progress` |
+| **DECIDE** | Use task dependency graph to determine next action (blocked tasks are skipped) |
+| **EXECUTE** | `TaskCreate` for sub-tasks if spawning sub-agents; sub-agents `TaskUpdate` when done |
+| **RECORD** | `TaskUpdate` with completion status (`completed`) |
+| **REPLY** | `TaskList` for final state summary |
+
+### 2. Dependency Chain
+
+The execute sub-steps form a dependency graph:
+
+```
+generate_task (no deps)
+  → implement_task (blocked by generate)
+    → verify_task (blocked by implement)
+      → reflect (blocked by verify)
+```
+
+Use `TaskCreate` with `addBlockedBy` to express this chain:
+
+```
+TaskCreate("generate_task", status: "pending")                          → task_id: A
+TaskCreate("implement_task", status: "pending", addBlockedBy: [A])      → task_id: B
+TaskCreate("verify_task", status: "pending", addBlockedBy: [B])         → task_id: C
+TaskCreate("reflect", status: "pending", addBlockedBy: [C])             → task_id: D
+```
+
+When a step completes (`TaskUpdate(status: "completed")`), the next becomes unblocked automatically.
+
+### 3. Session Persistence
+
+- `ralph.sh` sets `CLAUDE_CODE_TASK_LIST_ID` before invoking `claude`
+- Tasks persist in `~/.claude/tasks/` as JSON across sessions and context compaction
+- On resume: `TaskList` to see where we left off — no need to parse `STATE.yaml` for `sub_step`
+
+### 4. Multi-Session Coordination
+
+- Multiple Claude sessions can share the same task list via `CLAUDE_CODE_TASK_LIST_ID`
+- Sub-agents spawned via the Task tool can claim and update tasks from the shared list
+- Use `TaskUpdate(status: 'in_progress')` to signal work is active (shows spinner in terminal)
+
+### 5. Sub-Agent MCP Restriction
+
+**IMPORTANT:** Sub-agents spawned via the Task tool CANNOT access project-scoped MCP servers (`.mcp.json`).
+
+| Agent | MCP Access | Model Dispatch Method |
+|-------|-----------|----------------------|
+| **Main orchestrator** | ✅ CAN use Codex MCP | `codex` / `codex-reply` MCP tools |
+| **Sub-agents** | ❌ NO MCP access | `codex exec` (shell command) only |
+
+This is a known Claude Code limitation. Design sub-agent prompts to use `codex exec` for GPT-5.2/gpt-5.2-codex dispatch, never Codex MCP tools.
+
+### 6. Hybrid State Model
+
+Tasks and STATE.yaml coexist with clear separation of concerns:
+
+| System | Tracks | Example |
+|--------|--------|---------|
+| **STATE.yaml** | Pipeline config — the *what* | phase, mode, budget, baselines, policy |
+| **Tasks** | Workflow progress — the *how* | which sub-step, dependencies, completion status |
+| **Sentinel DSL** | LLM↔script communication — the *language* | nonce-tagged plan/verdict blocks |
+
+**Never duplicate data between Tasks and STATE.yaml.** Tasks track progress, STATE.yaml tracks configuration. If you need to know *where* in the pipeline: STATE.yaml. If you need to know *what's been done this cycle*: Tasks.
+
+### 7. Task Naming Convention
+
+Tasks follow the pattern: `deadf-{run_id}-{task_id}-{sub_step}`
+
+Examples:
+- `deadf-run001-auth01-generate`
+- `deadf-run001-auth01-implement`
+- `deadf-run001-auth01-verify`
+- `deadf-run001-auth01-reflect`
+
+---
+
 ## Sentinel Parsing
 
 ### Nonce Lifecycle
@@ -485,6 +571,16 @@ DEADF_CYCLE <cycle_id>
   ├─ RECORD:   Update STATE.yaml (always increment iteration)
   └─ REPLY:    CYCLE_OK | CYCLE_FAIL | DONE  (printed to stdout, last line)
 ```
+
+### Task Management Commands
+
+| Action | How |
+|--------|-----|
+| Check tasks | `TaskList` (native Claude Code tool) |
+| Get task details | `TaskGet` with task ID |
+| Create task | `TaskCreate` with description and dependencies (`addBlockedBy`/`addBlocks`) |
+| Update task | `TaskUpdate` with status: `pending` / `in_progress` / `completed` |
+| Task list ID | Set `CLAUDE_CODE_TASK_LIST_ID` env var (ralph.sh does this automatically) |
 
 ---
 
