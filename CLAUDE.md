@@ -248,12 +248,11 @@ On parse failure after retry: `CYCLE_FAIL`
 --- OBJECTIVE (1-2) ---
 1. Implement the smallest change set that satisfies ALL acceptance criteria
    and stays within ESTIMATED_DIFF × 3 lines.
-2. Run ./verify.sh BEFORE committing. Check the JSON output for "pass": true.
-   NOTE: verify.sh ALWAYS exits 0 — do NOT use exit code to judge pass/fail.
-   Parse stdout JSON and check the "pass" field. If "pass": false, read "failures"
-   array, fix the issues, and re-run. Only commit when "pass": true.
-   Max 3 verify attempts — if still failing after 3, commit anyway and let the
-   orchestrator's verify stage handle it.
+2. Run the project's test and lint commands BEFORE committing (if OPS.md
+   specifies them). Fix any failures. Do NOT run ./verify.sh yourself —
+   that is the orchestrator's job post-commit (it checks git state, diffs,
+   paths, secrets, and git cleanliness which require a committed tree).
+   Only commit when tests and lint pass.
 
 --- GUARDRAILS (999+) ---
 99999. Do NOT touch files outside the FILES list unless strictly required.
@@ -299,7 +298,11 @@ For each `LLM:` acceptance criterion:
 1. Build a **per-criterion evidence bundle** (minimal context):
    - The `ACn` text
    - verify.sh JSON excerpt: `pass`, `test_summary`, `lint_exit`, `diff_lines`, `secrets_found`, `git_clean`
-   - `git show --stat` (ALL changed files, not just planned ones — flag any out-of-scope changes)
+   - `git show --stat` (ALL changed files, not just planned ones)
+   - If files outside the plan's FILES list were modified, include their diff hunks too
+     and instruct the sub-agent: "Files outside the planned scope were modified. If any
+     out-of-scope change is non-trivial (not just formatting/imports), answer NO with
+     reason 'out-of-scope modification: {filename}'."
    - Diff hunks for files relevant to this criterion
    - Test output (if applicable)
 2. Spawn sub-agent via the **Task tool** with per-criterion prompt + evidence bundle
@@ -353,9 +356,10 @@ On NEEDS_HUMAN: set `phase: needs_human` (all modes)
 
 ### `retry_task` (execute phase)
 
-1. Increment `task.retry_count`
-2. Set `task.sub_step: implement` (re-enter implementation)
-3. Include failure context in next implementation prompt
+**Note:** `task.retry_count` was already incremented by `verify_task` on FAIL. Do NOT increment again here.
+
+1. Set `task.sub_step: implement` (re-enter implementation)
+2. Include failure context in next implementation prompt (last_result.details, verify.sh failures)
 
 ### `replan_task` (execute phase — stuck recovery)
 
@@ -532,8 +536,8 @@ ESTIMATED_DIFF=<positive integer>
 - `DET: ...` — Deterministic: auto-passed when verify.sh reports `"pass": true`. **DET criteria MUST map to one of verify.sh's 6 checks:**
   1. Tests pass (pytest/jest/etc exit 0)
   2. Lint passes (configured linter exit 0)
-  3. Build succeeds (if applicable)
-  4. Diff lines within 3× ESTIMATED_DIFF
+  3. Diff lines within 3× ESTIMATED_DIFF
+  4. Path validation (no blocked paths: .env*, *.pem, *.key, .ssh/, .git/)
   5. No secrets detected
   6. Git tree clean (no uncommitted files)
 - `LLM: ...` — LLM-judged: requires sub-agent reasoning (code quality, design, documentation tone, file existence, specific output matching, anything NOT in the 6 checks above)
