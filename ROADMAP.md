@@ -80,11 +80,31 @@ tracks:
     done_when:
       - "One full cycle completes; artifacts are reproducible; verifier outcome matches verdict."
 
+  - id: 7
+    name: "Native Task Management Integration"
+    goal: "Integrate Claude Code Task system for persistent workflow tracking with dependency graphs"
+    deliverables:
+      - "Update CLAUDE.md to use TaskCreate/TaskUpdate for cycle sub-steps"
+      - "Update ralph.sh to set CLAUDE_CODE_TASK_LIST_ID and check task status"
+      - "Create task templates for the cycle flow (generate → implement → verify → reflect)"
+      - "Hybrid state: Tasks for workflow, STATE.yaml for config, sentinel for LLM comms"
+      - "Document MCP limitation: sub-agents use codex exec, not MCP tools"
+    steps:
+      - "Research complete (Task system + MCP constraints documented)"
+      - "Update CLAUDE.md with TaskCreate/TaskUpdate instructions for each cycle step"
+      - "Update ralph.sh to initialize task list and monitor via task status"
+      - "Test: run a full cycle using Tasks for tracking"
+    done_when:
+      - "CLAUDE.md references TaskCreate/TaskUpdate for workflow management"
+      - "ralph.sh initializes and monitors via CLAUDE_CODE_TASK_LIST_ID"
+      - "Full cycle completes with Tasks persisting across context compaction"
+
 milestones:
   - "M1: Track 1 complete (identical components in place)."
   - "M2: Tracks 2+3 complete (contract + loop operational)."
   - "M3: Tracks 4+5 complete (docs + cleanup + MCP ready)."
   - "M4: Track 6 complete (end-to-end green run)."
+  - "M5: Track 7 complete (Task integration operational)."
 
 risks:
   - "Non-determinism from model variability impacting verify.sh gating."

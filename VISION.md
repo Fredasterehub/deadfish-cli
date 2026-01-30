@@ -24,6 +24,10 @@ mvp_scope:
     - "Deterministic role separation + handoffs across planner/implementer/verifier."
     - "Local session persistence + resume via `--continue`."
     - "Artifacted notifications/logs suitable for CI and humans."
+    - "Native Claude Code Task Management integration (TaskCreate/TaskGet/TaskUpdate/TaskList)"
+    - "Dependency graph for cycle sub-steps (generate → implement → verify → reflect)"
+    - "Multi-session persistence via CLAUDE_CODE_TASK_LIST_ID"
+    - "Hybrid state: Tasks for workflow tracking + STATE.yaml for pipeline config + sentinel for LLM comms"
   out:
     - "Discord/Clawdbot integration."
     - "Multi-tenant UX, chat UI, or web dashboard."
