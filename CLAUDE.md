@@ -249,6 +249,8 @@ Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; trea
 5. Write plan to `.deadf/tracks/{track.id}/PLAN.md`.
 6. Update `STATE.yaml`:
    - `track.plan_path: ".deadf/tracks/{track.id}/PLAN.md"`
+   - `track.task_count: <from PLAN TASK_COUNT>`
+   - `track.task_current: 1`
    - `track.status: in-progress` (keep consistent with pipeline)
    - `phase: execute`
    - `task.sub_step: generate`
@@ -256,6 +258,7 @@ Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; trea
 ### Track artifacts (`.deadf/tracks/`)
 - `.deadf/tracks/{track.id}/SPEC.md` — P4 output
 - `.deadf/tracks/{track.id}/PLAN.md` — P5 output
+- `.deadf/tracks/{track.id}/tasks/` — P6 outputs (TASK_001.md, TASK_002.md, etc.)
 
 ### `generate_task` (execute phase)
 
