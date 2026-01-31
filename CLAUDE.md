@@ -179,11 +179,11 @@ Ralph does **not** parse stdout tokens; it polls `STATE.yaml` (`cycle.status`/`p
 This phase is **human-driven**. Claude Code must **NOT** generate seed docs automatically.
 
 Deterministic rule:
-1. If `.deadf/seed/P2_DONE` is missing **OR** `VISION.md`/`ROADMAP.md` are missing/empty:
+1. If `.deadf/seed/P2_DONE` is missing **OR** any of `VISION.md`, `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.yaml` are missing/empty:
    - set `phase: needs_human`
    - write a notification instructing the operator to run the P2 runner:
      `.pipe/p12-init.sh --project "<project_root>"`
-2. If `P2_DONE` exists **and** both docs exist:
+2. If `P2_DONE` exists **and** all five files exist and are non-empty:
    - set `phase: select-track` (do not overwrite docs)
 
 Note: `.deadf/seed/` is the seed docs ledger directory.
@@ -201,16 +201,61 @@ Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; trea
 
 ### `pick_track` (select-track phase)
 
-1. Consult GPT-5.2 planner to select next track from `tracks_remaining`
-2. Set `track.id`, `track.name`, `track.status: in-progress`
-3. Advance sub-step
+1. Load `STATE.yaml`, `ROADMAP.md`, `REQUIREMENTS.md` (also `VISION.md` and `PROJECT.md` for context).
+2. Consult GPT-5.2 planner using `.pipe/p3/P3_PICK_TRACK.md`.
+3. Expect exactly one TRACK sentinel block:
+   ```
+   <<<TRACK:V1:NONCE={nonce}>>>
+   ...
+   <<<END_TRACK:NONCE={nonce}>>>
+   ```
+4. Parse output with `extract_plan.py --nonce <nonce>` (see [Sentinel Parsing](#sentinel-parsing)).
+5. Special signals:
+   - `PHASE_COMPLETE=true` → verify phase success criteria; on pass advance `roadmap.current_phase` and update ROADMAP status, otherwise re-enter `pick_track` with unmet criteria context.
+   - `PHASE_BLOCKED=true` with `REASONS=...` → set `phase: needs_human` and surface reasons.
+6. On normal track selection, update `STATE.yaml`:
+   - `track.id`, `track.name`, `track.phase`, `track.requirements`, `track.goal`, `track.estimated_tasks`
+   - `track.status: in-progress`
+   - `track.spec_path: null`, `track.plan_path: null`
 
-### `create_spec` / `create_plan` (select-track phase)
+### `create_spec` (select-track phase)
 
-1. Consult GPT-5.2 planner for track spec/plan
-2. Parse output with `extract_plan.py --nonce <nonce>` (see [Sentinel Parsing](#sentinel-parsing))
-3. Update track details
-4. On plan complete: set `phase: execute`, `task.sub_step: generate`
+1. Load `STATE.yaml`, `ROADMAP.md`, `REQUIREMENTS.md`, `PROJECT.md`, and `OPS.md` (if present).
+2. Search the codebase (`rg`, `find`) for related implementations before assuming anything is missing.
+3. Consult GPT-5.2 planner using `.pipe/p4/P4_CREATE_SPEC.md`.
+4. Expect exactly one SPEC sentinel block:
+   ```
+   <<<SPEC:V1:NONCE={nonce}>>>
+   ...
+   <<<END_SPEC:NONCE={nonce}>>>
+   ```
+5. Parse output with `extract_plan.py --nonce <nonce>` (see [Sentinel Parsing](#sentinel-parsing)).
+6. Write spec to `.deadf/tracks/{track.id}/SPEC.md`.
+7. Update `STATE.yaml`:
+   - `track.spec_path: ".deadf/tracks/{track.id}/SPEC.md"`
+   - `track.status: in-progress` (keep consistent with pipeline)
+
+### `create_plan` (select-track phase)
+
+1. Load `STATE.yaml`, the track `SPEC.md` at `track.spec_path`, `PROJECT.md`, and `OPS.md` (if present).
+2. Consult GPT-5.2 planner using `.pipe/p5/P5_CREATE_PLAN.md`.
+3. Expect exactly one PLAN sentinel block:
+   ```
+   <<<PLAN:V1:NONCE={nonce}>>>
+   ...
+   <<<END_PLAN:NONCE={nonce}>>>
+   ```
+4. Parse output with `extract_plan.py --nonce <nonce>` (see [Sentinel Parsing](#sentinel-parsing)).
+5. Write plan to `.deadf/tracks/{track.id}/PLAN.md`.
+6. Update `STATE.yaml`:
+   - `track.plan_path: ".deadf/tracks/{track.id}/PLAN.md"`
+   - `track.status: in-progress` (keep consistent with pipeline)
+   - `phase: execute`
+   - `task.sub_step: generate`
+
+### Track artifacts (`.deadf/tracks/`)
+- `.deadf/tracks/{track.id}/SPEC.md` — P4 output
+- `.deadf/tracks/{track.id}/PLAN.md` — P5 output
 
 ### `generate_task` (execute phase)
 

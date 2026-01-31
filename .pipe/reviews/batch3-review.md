@@ -1,182 +1,126 @@
-# Batch 3 QA Review — P3/P4/P5 Prompt Files (T07-T09)
+# Batch 3 Review — T07/T08/T09 (P3-P5 Prompts)
 
-**Reviewer:** Opus 4.5 (QA subagent)
-**Date:** 2025-07-18
-**Sources:** P3_PICK_TRACK.md, P4_CREATE_SPEC.md, P5_CREATE_PLAN.md
-**Reviewed against:** p2-p5-restructure-opus.md (sections 6, 7, 8), CLAUDE.md (sentinel DSL, DECIDE table)
+**Reviewer:** Claude Opus 4.5 (subagent)
+**Date:** 2025-07-19
+**Overall verdict:** CLEAN
 
 ---
 
-## T07: P3_PICK_TRACK.md
+## Per-File Verdicts
 
-**Verdict: PASS**
+| File | Task | Verdict |
+|------|------|---------|
+| `P3_PICK_TRACK.md` | T07 | ✅ CLEAN |
+| `P4_CREATE_SPEC.md` | T08 | ✅ CLEAN (1 LOW) |
+| `P5_CREATE_PLAN.md` | T09 | ✅ CLEAN |
+
+---
+
+## P3_PICK_TRACK.md (T07 — Track Selection)
 
 ### Checklist
 
-| Check | Status | Notes |
-|-------|--------|-------|
-| Layered prompt structure (0a-0c / 1 / rules / 999+) | ✅ | All four layers present |
-| Reads STATE.yaml | ✅ | 0a reads roadmap.current_phase |
-| Reads ROADMAP.md | ✅ | 0b loads phase goal, success_criteria, requirements |
-| Reads REQUIREMENTS.md | ✅ | 0c collects status per requirement ID |
-| Reads VISION.md + PROJECT.md | ✅ | 0c includes both as optional context |
-| TRACK sentinel format matches plan §6 | ✅ | All fields present: TRACK_ID, TRACK_NAME, PHASE, REQUIREMENTS, GOAL, ESTIMATED_TASKS |
-| Nonce in sentinel header/footer | ✅ | `<<<TRACK:V1:NONCE={nonce}>>>` / `<<<END_TRACK:NONCE={nonce}>>>` |
-| PHASE_COMPLETE signal | ✅ | Defined as sentinel block with PHASE_COMPLETE=true |
-| PHASE_BLOCKED signal | ✅ | Defined with PHASE_BLOCKED=true + REASONS |
-| Rule: maximize progress on unmet criteria | ✅ | Explicit in rules |
-| Rule: prefer unblocked reqs | ✅ | Explicit in rules |
-| Rule: 2-5 tasks | ✅ | "target 2–5 tasks per track" in rules + guardrail 9999999 |
-| Rule: never outside current phase | ✅ | First rule + guardrail 999999999 |
-| Guardrail: output ONLY sentinel | ✅ | Guardrail 99999 |
+| # | Check | Status | Notes |
+|---|-------|--------|-------|
+| 1 | Layered structure (0a-0c / 1 / RULES / 999+) | ✅ | All four sections present with correct headers |
+| 2 | Sentinel TRACK format verbatim | ✅ | Matches restructure plan §6 exactly |
+| 3 | Input files per restructure plan | ✅ | STATE.yaml (0a), ROADMAP.md (0b), REQUIREMENTS.md (0c), VISION.md + PROJECT.md (0c) |
+| 4 | Rules completeness | ✅ | All 6 rules from §6 present: maximize progress, prefer unblocked, prefer smaller, never outside phase, PHASE_COMPLETE, PHASE_BLOCKED |
+| 5 | Guardrails | ✅ | Output-only sentinel (99999), no invented IDs (999999), ESTIMATED_TASKS 2-5 (9999999), no outside-phase work (99999999) |
+| 6 | Signal outputs | ✅ | PHASE_COMPLETE=true with PHASE={phase_id}; PHASE_BLOCKED=true with PHASE + REASONS |
 
 ### Issues
 
-| Severity | Description | Fix Needed |
-|----------|-------------|------------|
-| LOW | PHASE_COMPLETE/PHASE_BLOCKED use a modified sentinel form (`TRACK sentinel block containing only PHASE_COMPLETE=true`) rather than a dedicated signal keyword. This is slightly different from the plan's prose ("output PHASE_COMPLETE") but functionally equivalent and arguably better (keeps parsing uniform). | No fix required — design improvement over plan |
-| LOW | Guardrail numbering uses 99999999 (8 nines) exceeding the typical pattern (99999/999999/9999999). Cosmetic only. | Optional: trim to 3 guardrails matching other files |
+None.
+
+### Notes
+
+- Signal output definitions are embedded in RULES rather than as a separate section, which is fine — they're clearly specified with exact field lists and "omit all other track fields" instruction.
+- Guardrail numbering follows escalating 9s pattern consistent with CLAUDE.md convention.
 
 ---
 
-## T08: P4_CREATE_SPEC.md
-
-**Verdict: NEEDS_FIXES**
+## P4_CREATE_SPEC.md (T08 — JIT Spec)
 
 ### Checklist
 
-| Check | Status | Notes |
-|-------|--------|-------|
-| Layered prompt structure (0a-0c / 1 / rules / 999+) | ✅ | All layers present |
-| Reads STATE.yaml | ✅ | 0a reads track.id, track.name, track.phase, track.requirements, track.spec_path |
-| Reads ROADMAP.md | ⚠️ | **NOT explicitly mentioned**. Plan §7 says "ROADMAP.md (current phase success criteria)" should be loaded. 0b reads REQUIREMENTS.md instead. |
-| Reads REQUIREMENTS.md | ✅ | 0b extracts full text + acceptance criteria |
-| Reads PROJECT.md | ✅ | 0c reads PROJECT.md |
-| Reads OPS.md | ✅ | 0c reads OPS.md |
-| Codebase search | ✅ | 0c: "Search codebase first (rg/find results provided by the pipeline)" |
-| SPEC sentinel format matches plan §7 | ✅ | All fields present and ordered correctly |
-| AC→REQ traceability (req=<REQ-ID>) | ✅ | `id=AC<n> req=<REQ-ID> text="..."` |
-| DET:/LLM: tagging | ✅ | Rule: "Tag each acceptance criterion with DET: or LLM:" |
-| Anti-hallucination guardrails for EXISTING_CODE | ✅ | Dedicated "CODEBASE SEARCH EVIDENCE" section + guardrail 999999 |
-| "Spec defines WHAT not HOW" | ✅ | Objective §1 + first rule |
-| Scope constraint | ✅ | "<=5 tasks worth of work" |
+| # | Check | Status | Notes |
+|---|-------|--------|-------|
+| 1 | Layered structure (0a-0c / 1 / RULES / 999+) | ✅ | All four sections present, plus bonus CODEBASE SEARCH EVIDENCE section |
+| 2 | Sentinel SPEC format verbatim | ✅ | Matches restructure plan §7 exactly |
+| 3 | Input files per restructure plan | ✅ | STATE.yaml + ROADMAP.md (0a), REQUIREMENTS.md (0b), codebase search + PROJECT.md + OPS.md (0c) |
+| 4 | Rules completeness | ✅ | All rules present: AC→REQ tracing, DET:/LLM: tagging, existing code inclusion, scope, WHAT-not-HOW, atomic FRs |
+| 5 | Guardrails | ✅ | Output-only (99999), no hallucination (999999), verifiable ACs (9999999) |
+| 7 | AC traceability | ✅ | `req=<REQ-ID>` in sentinel format, DET:/LLM: tagging rule explicit |
 
 ### Issues
 
-| Severity | Description | Fix Needed |
-|----------|-------------|------------|
-| MEDIUM | **ROADMAP.md not in loading instructions.** Plan §7 explicitly lists ROADMAP.md as input ("current phase success criteria"). The prompt loads STATE.yaml, REQUIREMENTS.md, PROJECT.md, OPS.md but omits ROADMAP.md. While REQUIREMENTS.md carries the requirement text, the phase-level *success criteria* live in ROADMAP.md and provide important scope context for the spec. | Add to 0a or 0b: "Read ROADMAP.md for current phase success criteria." |
-| LOW | Plan §7 says "Keep scope tight: 2-5 tasks worth of work" but the prompt says "<=5 tasks worth of work" (missing the lower bound of 2). Minor wording divergence. | Optional: change to "2-5 tasks worth of work" for consistency with plan |
+| # | Severity | Issue | Location |
+|---|----------|-------|----------|
+| 1 | LOW | Scope sizing says "<=5 tasks" where restructure plan §7 says "2-5 tasks" | RULES, line "Keep scope tight" |
+
+**Detail:** The restructure plan §7 says "Keep scope tight: 2-5 tasks worth of work." P4 says "<=5 tasks worth of work." The missing lower bound of 2 is cosmetic — a 1-task spec would just be very small and wouldn't cause problems. The Codex prompt T08 itself also says "≤5 tasks" so P4 is consistent with its generation prompt.
+
+**Fix (optional):** Change "<=5 tasks" to "2-5 tasks" for consistency with the restructure plan. Not blocking.
+
+### Notes
+
+- The CODEBASE SEARCH EVIDENCE section after RULES is a good addition — it explicitly handles the "no search evidence provided" edge case per the Codex prompt T08 requirement.
+- The `(preserve DET/LLM tagging as defined there)` note in 0b is a valuable addition beyond the restructure plan spec.
 
 ---
 
-## T09: P5_CREATE_PLAN.md
-
-**Verdict: PASS**
+## P5_CREATE_PLAN.md (T09 — Plans-as-Prompts)
 
 ### Checklist
 
-| Check | Status | Notes |
-|-------|--------|-------|
-| Layered prompt structure (0a-0c / 1 / rules / 999+) | ✅ | All layers present |
-| Reads STATE.yaml | ✅ | 0a reads track id, name, phase, spec_path |
-| Reads SPEC.md | ✅ | 0b reads SPEC.md at spec_path |
-| Reads PROJECT.md | ✅ | 0c reads PROJECT.md |
-| Reads OPS.md | ✅ | 0c reads OPS.md |
-| PLAN sentinel format matches plan §8 | ✅ | All fields: TRACK_ID, TASK_COUNT, TASK[n] with TASK_ID, TITLE, SUMMARY, FILES, ACCEPTANCE, ESTIMATED_DIFF, DEPENDS_ON |
-| Plans-as-prompts (SUMMARY executable by codex) | ✅ | "SUMMARY is the implementers prompt. Write it as imperative instructions, not narrative." |
-| Rule: 2-5 tasks | ✅ | "2-5 tasks per track" |
-| Rule: ≤200 diff lines | ✅ | "Each task <=200 diff lines" |
-| Rule: ≤5 files | ✅ | "<=5 files per task unless strictly necessary" |
-| Rule: every SPEC AC in exactly one task | ✅ | "Every SPEC.md acceptance criterion must appear in exactly one task's ACCEPTANCE list (no duplicates, no omissions)" |
-| Rule: each task ≥1 DET: criterion | ✅ | "Each task must have >=1 DET: criterion" |
-| Guardrails: output ONLY sentinel | ✅ | Guardrail 99999 |
-| Guardrails: plans are prompts | ✅ | Guardrail 999999 |
-| Guardrails: no vague AC | ✅ | Guardrail 9999999 |
+| # | Check | Status | Notes |
+|---|-------|--------|-------|
+| 1 | Layered structure (0a-0c / 1 / RULES / 999+) | ✅ | All four sections present |
+| 2 | Sentinel PLAN format verbatim | ✅ | Matches restructure plan §8 exactly including TASK_COUNT and DEPENDS_ON |
+| 3 | Input files per restructure plan | ✅ | STATE.yaml (0a), SPEC.md (0b), PROJECT.md + OPS.md (0c) |
+| 4 | Rules completeness | ✅ | All rules present: 2-5 tasks, ≤200 lines, ≤5 files, sequential execution, DEPENDS_ON, imperative SUMMARY, ESTIMATED_DIFF, exact AC coverage |
+| 5 | Guardrails | ✅ | Output-only (99999), no hallucinated files (999999), implementation-ready (9999999), no vague ACs (99999999) |
+| 8 | Plans-as-prompts | ✅ | SUMMARY described as "imperative, directly executable by gpt-5.2-codex", concrete instructions requirement, OPS.md commands inclusion |
 
 ### Issues
 
-| Severity | Description | Fix Needed |
-|----------|-------------|------------|
-| LOW | Plan §8 says "Each task must have ≥1 DET: criterion (tests pass) and ≥1 meaningful criterion." The prompt says ">=1 DET: criterion" but drops the "and ≥1 meaningful criterion" clause. The next rule ("Use DET: only for verify.sh checks; everything else is LLM:") partially compensates. | Optional: add "and at least one LLM: criterion" for full parity |
-| LOW | Plan §8 mentions "Acceptance criteria inherited from SPEC.md, distributed across tasks." The prompt captures the distribution rule ("every SPEC.md AC...") but doesn't use the word "inherited." Functionally equivalent. | No fix required |
+None.
+
+### Notes
+
+- P5 adds a valuable DET:/LLM: clarification rule: "DET: only for verify.sh checks (tests, lint, diff within 3x, path safety, no secrets, git clean). All other criteria must be LLM:." This goes beyond the restructure plan §8 which just says "≥1 DET: criterion" — the added specificity aligns with CLAUDE.md's DET:/LLM: convention and will reduce misclassification.
+- The "actual diff should stay within 3x" note on ESTIMATED_DIFF is a helpful addition.
+- Exact AC coverage rule is clearly stated: "Every acceptance criterion from SPEC.md must appear in exactly one task's ACCEPTANCE list (no duplicates, no omissions)."
 
 ---
 
-## Cross-File Consistency
+## Codex Done-When Checklist Verification
 
-**Verdict: PASS (with one MEDIUM note)**
+### T07 (P3_PICK_TRACK.md)
+- [x] File exists with layered (0a/1/rules/999+) structure
+- [x] Instructs reading STATE.yaml, ROADMAP.md, REQUIREMENTS.md, VISION.md, PROJECT.md
+- [x] Includes TRACK sentinel format verbatim
+- [x] Defines PHASE_COMPLETE=true and PHASE_BLOCKED=true signal outputs
+- [x] Guardrails forbid selecting work outside current phase
 
-### Sentinel Chain Logic (P3 → P4 → P5)
+### T08 (P4_CREATE_SPEC.md)
+- [x] File exists with layered (0a/1/rules/999+) structure
+- [x] Instructs loading STATE.yaml, ROADMAP.md, REQUIREMENTS.md, PROJECT.md, OPS.md + codebase search
+- [x] Includes SPEC sentinel format verbatim
+- [x] Requires AC→REQ traceability and DET:/LLM: tagging
+- [x] Contains anti-hallucination guardrails for EXISTING_CODE
 
-| Step | Sentinel | Key Field | Feeds Into |
-|------|----------|-----------|------------|
-| P3 | TRACK:V1 | TRACK_ID, REQUIREMENTS | P4 reads track.id and track.requirements from STATE.yaml |
-| P4 | SPEC:V1 | TRACK_ID, ACCEPTANCE_CRITERIA | P5 reads SPEC.md via track.spec_path |
-| P5 | PLAN:V1 | TRACK_ID, TASK[n].ACCEPTANCE | P6 (generate_task) reads individual tasks |
-
-✅ **Chain is logically consistent.** TRACK_ID flows through all three sentinels. Requirements flow from P3 selection → P4 spec (REQUIREMENTS section) → P5 plan (distributed into task ACCEPTANCE).
-
-### Field Name Consistency
-
-- `TRACK_ID` — used consistently across all three sentinels ✅
-- `REQUIREMENTS` — P3 uses `REQUIREMENTS=[comma-separated]`, P4 uses `REQUIREMENTS:` list with `id=` entries. Different format but semantically consistent ✅
-- `ACCEPTANCE_CRITERIA` (P4) maps to `ACCEPTANCE` (P5 per-task) — name difference is intentional (P4 is full spec, P5 distributes into tasks) ✅
-- `NONCE={nonce}` — consistent across all three ✅
-
-### File Loading Patterns
-
-| Phase | STATE.yaml | ROADMAP.md | REQUIREMENTS.md | VISION.md | PROJECT.md | OPS.md | SPEC.md |
-|-------|-----------|------------|-----------------|-----------|------------|--------|---------|
-| P3 | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
-| P4 | ✅ | ⚠️ missing | ✅ | — | ✅ | ✅ | — |
-| P5 | ✅ | — | — | — | ✅ | ✅ | ✅ |
-
-⚠️ **P4 omits ROADMAP.md** — see T08 MEDIUM issue above. Plan §7 and the token budget table (§9) both list ROADMAP for P4.
-
-### Alignment with CLAUDE.md DECIDE Table
-
-| DECIDE Row | Action | Prompt File | Alignment |
-|------------|--------|-------------|-----------|
-| #7 | `pick_track` | P3_PICK_TRACK.md | ✅ Phase `select-track`, no track selected |
-| #8 | `create_spec` | P4_CREATE_SPEC.md | ✅ Track selected, no spec |
-| #9 | `create_plan` | P5_CREATE_PLAN.md | ✅ Spec exists, no plan |
-
-✅ The three prompts map cleanly to DECIDE rows 7-9. The flow `select-track` → pick_track → create_spec → create_plan → `execute` is preserved.
-
-**Note:** CLAUDE.md's current action specs for `pick_track`, `create_spec`, `create_plan` (in the Action Specifications section) are still sparse stubs ("Consult GPT-5.2 planner..."). T10 will update these to reference the new prompt files and sentinel formats. This is expected and not a defect in the current batch.
+### T09 (P5_CREATE_PLAN.md)
+- [x] File exists with layered (0a/1/rules/999+) structure
+- [x] Instructs loading STATE.yaml, SPEC.md, PROJECT.md, OPS.md
+- [x] Includes PLAN sentinel format verbatim
+- [x] Enforces 2-5 tasks, ≤200 lines/task, ≤5 files/task
+- [x] Enforces exact coverage: every SPEC AC in exactly one task
+- [x] Defines SUMMARY as direct gpt-5.2-codex implementation prompt (imperative, actionable)
 
 ---
 
-## Overall Verdict: **NEEDS_FIXES**
+## Summary
 
-### Summary
-
-| File | Verdict | Critical | High | Medium | Low |
-|------|---------|----------|------|--------|-----|
-| T07 (P3_PICK_TRACK.md) | PASS | 0 | 0 | 0 | 2 |
-| T08 (P4_CREATE_SPEC.md) | NEEDS_FIXES | 0 | 0 | 1 | 1 |
-| T09 (P5_CREATE_PLAN.md) | PASS | 0 | 0 | 0 | 2 |
-| Cross-file | PASS (with note) | 0 | 0 | 0 | 0 |
-
-### Required Fix (1 item)
-
-1. **T08 MEDIUM — Add ROADMAP.md to P4 loading instructions.**
-   In P4_CREATE_SPEC.md, add ROADMAP.md loading to orientation section. Suggested edit to 0a:
-   ```
-   0a. Read STATE.yaml to identify track.id, track.name, track.phase, track.requirements, track.spec_path.
-       Read ROADMAP.md for current phase success_criteria and requirement context.
-   ```
-   This aligns with plan §7's input list and the token budget analysis in §9.
-
-### Optional Improvements (5 items, all LOW)
-
-1. T07: Normalize guardrail numbering to 3 entries (99999/999999/9999999) matching P4/P5 pattern
-2. T08: Change "<=5 tasks" to "2-5 tasks" for consistency with plan wording
-3. T09: Add "and at least one LLM: criterion" to the DET rule for full parity with plan §8
-4. T07: PHASE_COMPLETE/PHASE_BLOCKED sentinel form could be documented more explicitly (what fields are required vs omitted)
-5. T09: Mention that acceptance criteria are "inherited from SPEC.md" for traceability clarity
-
----
-
-*Review complete. One MEDIUM fix required before merge. All other findings are LOW/optional.*
+All three prompt files are well-constructed and faithfully implement the restructure plan specifications. The single LOW-severity finding (P4 scope sizing "≤5" vs "2-5") is cosmetic and consistent with the Codex prompt that generated it. No CRITICAL or HIGH issues found. No fixes required.
