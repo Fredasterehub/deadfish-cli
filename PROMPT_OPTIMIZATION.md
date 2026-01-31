@@ -3,7 +3,7 @@
 > Ce fichier track la progression de l'optimisation de tous les prompts du pipeline deadf(ish).
 > Lire ce fichier + CLAUDE.md suffit pour reprendre le travail dans un contexte vide.
 
-## Status: EN COURS
+## Status: EN COURS (P2-P5 restructure complete, P6+ remaining)
 
 ## Méthodologie
 1. Inventorier tous les prompts (P1-P11) ✅
@@ -74,8 +74,8 @@
 | Phase | What It Does | Components | Status |
 |-------|-------------|------------|--------|
 | **1. INIT (P12)** | Detect green/brown/returning, map codebase → living docs, confirm with operator | `p12-init.sh`, `P12_DETECT.sh`, `P12_COLLECT.sh`, `P12_MAP.sh`, `P12_CONFIRM.sh`, `P12_INJECT.sh`, 3 prompts, budget checker | ✅ Implemented |
-| **2. RESEARCH (P2)** | BMAD brainstorm → VISION.md + ROADMAP.md | `p2-brainstorm.sh`, P2_MAIN + P2_A through P2_G (9 prompts) | ✅ Implemented |
-| **3. SELECT-TRACK (P3-P5)** | Pick track, create spec, create plan (sentinel DSL) | Contract in CLAUDE.md | ⚠️ Contract only |
+| **2. RESEARCH (P2)** | BMAD brainstorm → VISION.md + PROJECT.md + REQUIREMENTS.md + ROADMAP.md + STATE.yaml | `p2-brainstorm.sh`, P2_MAIN + P2_A through P2_G (9 prompts), P2_PROJECT_TEMPLATE, P2_REQUIREMENTS_TEMPLATE, P2_ROADMAP_TEMPLATE | ✅ Restructured (5-doc output) |
+| **3. SELECT-TRACK (P3-P5)** | Pick track (phase-aware), create JIT spec, create plan (plans-as-prompts) | P3_PICK_TRACK.md, P4_CREATE_SPEC.md, P5_CREATE_PLAN.md + CLAUDE.md contract | ✅ Implemented (sentinel TRACK/SPEC/PLAN blocks) |
 | **4. EXECUTE (P6-P7)** | Generate task, implement (Codex), self-backpressure verify | Contract in CLAUDE.md | ⚠️ Contract only |
 | **5. VERIFY (P8-P9)** | Deterministic checks (bash) + LLM verification (sub-agents) | `verify.sh` (P8) | ✅ P8 implemented / ⚠️ P9 contract only |
 | **6. REFLECT** | Commit/retry/replan/escalate, track completion | Contract in CLAUDE.md | ⚠️ Contract only |
@@ -96,26 +96,31 @@
 ### P2 — seed_docs / Brainstorm Session (Claude Code → GPT-5.2)
 - **Quand:** Phase `research`
 - **Modèle:** GPT-5.2 via `codex exec`
-- **Concept:** BMAD-style facilitated brainstorming session. AI is facilitator, human generates ideas. Structured flow: Session Setup → Technique Selection → Guided Ideation (anti-bias, domain shifts, 50-100+ ideas) → Organization (themes, prioritization) → Action Plans → seed docs (VISION.md / ROADMAP.md)
-- **Status:** ✅ Implemented (commit `2653d4c`)
+- **Concept:** BMAD-style facilitated brainstorming session. AI is facilitator, human generates ideas. Structured flow: Session Setup → Technique Selection → Guided Ideation (anti-bias, domain shifts, 50-100+ ideas) → Organization (themes, prioritization) → Crystallize (5 blocks: VISION/PROJECT/REQUIREMENTS/ROADMAP/STATE) → Output (5 docs) → Adversarial Review (all 5 docs)
+- **Outputs:** VISION.md (constitution), PROJECT.md (living context), REQUIREMENTS.md (checkable reqs w/ IDs + DET/LLM criteria), ROADMAP.md (phases-only, no tracks), STATE.yaml (init)
+- **Templates:** P2_PROJECT_TEMPLATE.md, P2_REQUIREMENTS_TEMPLATE.md, P2_ROADMAP_TEMPLATE.md
+- **Status:** ✅ Restructured (commits `2653d4c` → `ee996cd`)
 
 ### P3 — pick_track (Claude Code → GPT-5.2)
 - **Quand:** Phase `select-track`, aucun track sélectionné
-- **Modèle:** GPT-5.2 via `codex exec`
-- **Concept:** Sélection du prochain track
-- **Status:** 🔲 À optimiser — **IN PROGRESS (next brainstorm session)**
+- **Modèle:** GPT-5.2 via Codex MCP
+- **Prompt:** `.pipe/p3/P3_PICK_TRACK.md`
+- **Concept:** Phase-aware track selection. Reads STATE.yaml + ROADMAP.md + REQUIREMENTS.md. Outputs sentinel TRACK block (<<<TRACK:V1:NONCE=...>>>). Supports PHASE_COMPLETE and PHASE_BLOCKED signals for phase transitions. Rules: maximize progress on unmet criteria, prefer unblocked reqs, 2-5 tasks/track, never outside current phase.
+- **Status:** ✅ Implemented (commit `1d8c237`)
 
 ### P4 — create_spec (Claude Code → GPT-5.2)
 - **Quand:** Phase `select-track`, track choisi mais pas de spec
-- **Modèle:** GPT-5.2 via `codex exec`
-- **Concept:** Rédaction spec technique
-- **Status:** 🔲 À optimiser (brainstorm)
+- **Modèle:** GPT-5.2 via Codex MCP
+- **Prompt:** `.pipe/p4/P4_CREATE_SPEC.md`
+- **Concept:** JIT spec generation (Conductor-style "search first"). Reads STATE.yaml + ROADMAP.md + REQUIREMENTS.md + PROJECT.md + OPS.md + codebase search evidence. Outputs sentinel SPEC block (<<<SPEC:V1:NONCE=...>>>) with AC→REQ traceability, DET/LLM tagging, anti-hallucination guardrails for EXISTING_CODE. Writes to `.deadf/tracks/{track_id}/SPEC.md`.
+- **Status:** ✅ Implemented (commit `1d8c237`)
 
 ### P5 — create_plan (Claude Code → GPT-5.2)
 - **Quand:** Phase `select-track`, spec existe mais pas de plan
-- **Modèle:** GPT-5.2 via `codex exec`
-- **Concept:** Sentinel DSL plan block
-- **Status:** 🔲 À optimiser (Ralph: 0a/0b/0c + don't assume + FILES min + DET:/LLM: tagging)
+- **Modèle:** GPT-5.2 via Codex MCP
+- **Prompt:** `.pipe/p5/P5_CREATE_PLAN.md`
+- **Concept:** Plans-as-prompts (GSD pattern). SUMMARY field IS the gpt-5.2-codex implementation prompt — no transformation step. Reads STATE.yaml + SPEC.md + PROJECT.md + OPS.md. Outputs sentinel PLAN block (<<<PLAN:V1:NONCE=...>>>) with 2-5 tasks, ≤200 diff lines each, ≤5 files/task. Every SPEC AC appears in exactly one task. Writes to `.deadf/tracks/{track_id}/PLAN.md`.
+- **Status:** ✅ Implemented (commit `1d8c237`)
 
 ### P6 — generate_task (Claude Code → GPT-5.2)
 - **Quand:** Phase `execute`, sub_step `generate`
@@ -196,17 +201,18 @@ Each session follows the structured flow:
 
 | # | Prompt | Status |
 |---|--------|--------|
-| 1 | P2 — seed_docs / Brainstorm Session | ✅ Implemented (`2653d4c`) |
+| 1 | P2 — seed_docs / Brainstorm Session | ✅ Implemented + Restructured 5-doc output (`2653d4c` → `ee996cd`) |
 | 2 | P12 — Codebase Mapper / Brownfield | ✅ Implemented + QA fixed (`a7a924b`) |
-| 3 | P3 — pick_track | 🔄 **NEXT** |
-| 4 | P4 — create_spec | 🔲 |
-| 5 | P5 — create_plan | 🔲 |
-| 6 | P6 — generate_task | 🔲 |
+| 3 | P3 — pick_track | ✅ Implemented — phase-aware sentinel TRACK (`1d8c237`) |
+| 4 | P4 — create_spec | ✅ Implemented — JIT spec sentinel SPEC (`1d8c237`) |
+| 5 | P5 — create_plan | ✅ Implemented — plans-as-prompts sentinel PLAN (`1d8c237`) |
+| 6 | P6 — generate_task | 🔄 **NEXT** |
 | 7 | P7 — implement_task | 🔲 |
 | 8 | P9 — LLM Verification | 🔲 |
 | 9 | P10 — Format-Repair Retry | 🔲 |
 | 10 | P11 — QA Review | 🔲 |
 | — | P8 — verify.sh | ✅ Already solid |
+| — | P1 — Cycle Kick | 🔲 À optimiser |
 
 ### Phase 3: Integration Testing
 Run the optimized pipeline on a real project, verify improvements.
@@ -226,6 +232,15 @@ Run the optimized pipeline on a real project, verify improvements.
 | 2026-01-30 | BMAD = brainstorm methodology only | One-time interactive facilitation for P2 seed_docs, not a per-prompt template |
 | 2026-01-30 | Conductor = task generation/context persistence | Informs P6 (generate_task) and cross-cycle context management |
 | 2026-01-30 | Brainstorm is interactive with Fred | BMAD-style facilitated sessions, not automated — AI facilitates, Fred generates ideas |
+| 2026-01-30 | P2 outputs 5 files (not 2) | VISION + PROJECT + REQUIREMENTS + ROADMAP + STATE.yaml — GSD-inspired split for token efficiency and semantic clarity |
+| 2026-01-30 | VISION/PROJECT split | VISION = constitution (rarely changes), PROJECT = living context (accumulates decisions) — different change frequencies justify separate files |
+| 2026-01-30 | Skip STATE.md, enrich STATE.yaml | Autonomous pipeline doesn't need human-readable state file; project header in STATE.yaml |
+| 2026-01-30 | ROADMAP = phases only | Tracks planned JIT at P3/P4; roadmap stays strategic (success criteria + requirement refs) |
+| 2026-01-30 | REQUIREMENTS.md with DET/LLM pre-tagging | Acceptance criteria tagged at P2 time, inherited downstream to verify.sh — no re-classification |
+| 2026-01-30 | P3 = phase-aware track selection | Sentinel TRACK block with PHASE_COMPLETE/PHASE_BLOCKED signals for automatic phase transitions |
+| 2026-01-30 | P4 = Conductor JIT adapted | Codebase search replaces interactive Q&A; requirement tracing replaces user input |
+| 2026-01-30 | P5 = plans-as-prompts | GSD pattern: SUMMARY field IS the Codex implementation prompt, zero transformation |
+| 2026-01-30 | Track artifacts in .deadf/tracks/ | Per-track ephemeral storage (SPEC.md, PLAN.md, tasks/) — not polluting project root |
 
 ---
 
@@ -239,4 +254,4 @@ Run the optimized pipeline on a real project, verify improvements.
 | D | verify.sh JSON check clarified (exit 0 ≠ pass) | 🟡 Medium | ✅ |
 | E | Evidence bundles include ALL changed files | 🟡 Medium | ✅ |
 
-*Last updated: 2026-01-30 14:30 EST*
+*Last updated: 2026-01-30 21:40 EST*
