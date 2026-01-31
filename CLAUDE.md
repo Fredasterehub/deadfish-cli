@@ -249,6 +249,7 @@ Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; trea
 5. Write plan to `.deadf/tracks/{track.id}/PLAN.md`.
 6. Update `STATE.yaml`:
    - `track.plan_path: ".deadf/tracks/{track.id}/PLAN.md"`
+   - `track.plan_base_commit: <git rev-parse HEAD>`
    - `track.task_count: <from PLAN TASK_COUNT>`
    - `track.task_current: 1`
    - `track.status: in-progress` (keep consistent with pipeline)
@@ -262,45 +263,93 @@ Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; trea
 
 ### `generate_task` (execute phase)
 
-Construct the GPT-5.2 planner prompt using the **layered prompt structure**:
+Inputs:
+- `STATE.yaml`
+- `.deadf/tracks/{track.id}/PLAN.md`
+- `OPS.md` (if present)
+- current repo tree at `HEAD`
+
+Output:
+- `.deadf/tracks/{track.id}/tasks/TASK_{NNN}.md` where `NNN` is `track.task_current` (1-based) zero-padded to 3 digits
+
+Behavior (JIT task compiler/binder; mechanical by default):
+
+**Happy path (first attempt, no drift):** *no GPT call*
+1. Read `STATE.yaml` (track info, `track.task_current`, `task.retry_count`, `track.plan_base_commit`).
+2. Extract `TASK[track.task_current]` from `.deadf/tracks/{track.id}/PLAN.md`.
+3. Validate planned file paths against current `HEAD`:
+   - For `modify`/`delete`, target path must exist at `HEAD`.
+   - Use deterministic checks (`find`, `test -f`, `rg`). Do not guess.
+4. Compute fresh `task.files_to_load` (cap: **≤ 3000 tokens** total content):
+   - Start with planned `FILES` paths (especially all `modify`/`delete` targets).
+   - Add the minimal set of relevant tests, configs, and entrypoints/integration points.
+5. Copy relevant commands from `OPS.md` into the task packet (tests/lint/build/run).
+6. Write `.deadf/tracks/{track.id}/tasks/TASK_{NNN}.md` as structured markdown (no sentinel) using the TASK packet format below.
+7. Update `STATE.yaml`:
+   - `task.id: <from plan task>`
+   - `task.description: <from plan task; typically TITLE or TITLE + short summary>`
+   - `task.sub_step: implement`
+   - `task.files_to_load: <computed context pack paths>`
+
+**Drift path (plan_base_commit != HEAD AND bindings need adaptation):**
+- Drift detection requires BOTH:
+  - `track.plan_base_commit` differs from `HEAD`, AND
+  - evidence that plan file bindings are stale (missing `modify/delete` targets, moved files, integration point no longer present).
+- In this case, run a **small GPT call** using `.pipe/p6/P6_GENERATE_TASK.md` to adapt *only* bindings and context (do not re-plan).
+- Acceptance criteria are immutable.
+- Output is still the structured markdown task packet at `.deadf/tracks/{track.id}/tasks/TASK_{NNN}.md`.
+
+**Retry path (`task.retry_count > 0`):**
+- Use `.pipe/p6/P6_GENERATE_TASK.md` to package failure context and adapt execution guidance.
+- Keep acceptance criteria **immutable**; append retry guidance after the original SUMMARY, never replace it.
+- Output is still the structured markdown task packet at `.deadf/tracks/{track.id}/tasks/TASK_{NNN}.md`.
+
+**Hard stops (deterministic):**
+- If any planned `modify/delete` target is missing and cannot be resolved safely → `REPLAN_REQUIRED` (do not guess).
+- If required change size exceeds plan `ESTIMATED_DIFF` by **>3×** → `REQUEST_SPLIT` (do not proceed).
+
+TASK packet format (structured markdown; no sentinel):
+- Optional YAML frontmatter allowed.
+- Must carry through verbatim from PLAN: `TASK_ID`, `TITLE`, `SUMMARY`, `FILES`, `ACCEPTANCE`, `ESTIMATED_DIFF`, `DEPENDS_ON`.
+- Must include:
+  - `OPS.md` command list (tests/lint/build/run)
+  - `task.files_to_load` list (ordered; capped; each entry has a short “why”)
+  - Hard stop rules and the `REPLAN_REQUIRED` / `REQUEST_SPLIT` signals
+
+Minimum required sections (example structure):
 
 ```
---- ORIENTATION (0a-0c) ---
-0a. Read STATE.yaml: current phase, track, task position, last_result, loop.stuck_count.
-0b. Read track spec and existing plan docs. Read OPS.md if present.
-0c. Search the codebase (`rg`, `find`) for existing implementations related to this track.
-    Do NOT assume functionality is missing — confirm with code search first.
+# TASK — {TASK_ID}
 
---- OBJECTIVE (1) ---
-1. Generate the next task specification for track "{track.name}".
-   Output EXACTLY ONE sentinel plan block with nonce {nonce}.
-   Follow the <<<PLAN:V1:NONCE={nonce}>>> format precisely.
+## TITLE
+{TITLE}
 
---- RULES ---
-FILES minimization: Prefer ≤5 files unless strictly necessary.
-  Every file must have a rationale tied to an acceptance criterion.
-Acceptance testability: Each ACn MUST be prefixed:
-  - "DET: ..." for criteria covered by verify.sh's 6 checks ONLY (tests pass, lint pass, diff within 3×estimate, no blocked paths, no secrets, git clean)
-  - "LLM: ..." for everything else (code quality, design patterns, documentation tone, file existence, specific content, CLI output matching)
-ESTIMATED_DIFF calibration: Estimate smallest plausible implementation.
-  If estimate >200 lines, split into multiple tasks.
+## SUMMARY (verbatim)
+{SUMMARY}
 
---- GUARDRAILS (999+) ---
-99999. Output ONLY the sentinel plan block. No preamble, no explanation.
-999999. Do not hallucinate files that don't exist in the codebase.
-9999999. Acceptance criteria must be testable — no vague verbs without metrics.
+## FILES (verbatim)
+- path: ... | action: add|modify|delete | rationale: ...
+
+## ACCEPTANCE (verbatim)
+- AC1: DET: ...
+- AC2: LLM: ...
+
+## ESTIMATED_DIFF (verbatim)
+{ESTIMATED_DIFF}
+
+## DEPENDS_ON (verbatim)
+{DEPENDS_ON}
+
+## OPS COMMANDS
+- ...
+
+## FILES_TO_LOAD (ordered, capped)
+- path: ... | why: ...
+
+## HARD STOPS / SIGNALS
+- REPLAN_REQUIRED: <true|false + reason>
+- REQUEST_SPLIT: <true|false + reason>
 ```
-
-Parse output with `extract_plan.py --nonce <nonce>`.
-
-On parse success: write TASK.md from parsed plan, update STATE:
-   ```yaml
-   task.id: <from plan>
-   task.description: <from plan>
-   task.sub_step: implement
-   task.files_to_load: <from plan FILES>
-   ```
-On parse failure after retry: `CYCLE_FAIL`
 
 ### `implement_task` (execute phase)
 
