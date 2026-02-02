@@ -353,38 +353,23 @@ Minimum required sections (example structure):
 
 ### `implement_task` (execute phase)
 
-1. Construct the implementation prompt using the **layered prompt structure**:
+Inputs:
+- `STATE.yaml` (for `task.retry_count`, `task.max_retries`, and traceability fields)
+- Task packet: `.deadf/tracks/{track.id}/tasks/TASK_{NNN}.md` where `NNN` is `track.task_current` (1-based) zero-padded to 3 digits
+- P7 prompt template: `.pipe/p7/P7_IMPLEMENT_TASK.md`
 
-```
---- ORIENTATION (0a-0c) ---
-0a. Read TASK.md. Restate all acceptance criteria in one sentence each (self-check).
-0b. Read ONLY the files listed in task.files_to_load. Do not explore beyond scope.
-0c. Search (rg) for related symbols, types, and patterns before writing any code.
-    Do NOT assume — verify what exists first.
-    If OPS.md exists, read it for build/test/lint commands.
-
---- OBJECTIVE (1-2) ---
-1. Implement the smallest change set that satisfies ALL acceptance criteria
-   and stays within ESTIMATED_DIFF × 3 lines.
-2. Run the project's test and lint commands BEFORE committing (if OPS.md
-   specifies them). Fix any failures. Do NOT run ./verify.sh yourself —
-   that is the orchestrator's job post-commit (it checks git state, diffs,
-   paths, secrets, and git cleanliness which require a committed tree).
-   Only commit when tests and lint pass.
-
---- GUARDRAILS (999+) ---
-99999. Do NOT touch files outside the FILES list unless strictly required.
-999999. Do NOT modify blocked paths (.env*, *.pem, *.key, .ssh/, .git/).
-9999999. Keep git clean — no uncommitted files after commit.
-99999999. No secrets in code. Ever.
-999999999. Commit message format: "{TASK_ID}: {brief description}"
-```
-
-2. Dispatch to gpt-5.2-codex:
+1. Assemble the implementation prompt from the P7 template:
+   - Read the task packet file and inject it verbatim into the template as `{TASK_PACKET_CONTENT}`.
+   - Bind `{TASK_ID}` from `STATE.yaml` (`task.id`).
+   - Bind `{TITLE}` from the task packet’s `## TITLE` (verbatim).
+   - The template is structured as: IDENTITY → TASK PACKET → DIRECTIVES → GUARDRAILS → DONE CONTRACT.
+2. Use fixed `model_reasoning_effort` at dispatch time:
+   - always: `high`
+3. Dispatch to gpt-5.2-codex:
    ```bash
    codex exec -m gpt-5.2-codex -c 'model_reasoning_effort="high"' --approval-mode full-auto "<implementation prompt>"
    ```
-3. Read results from git (deterministic, no LLM parsing):
+4. Read results from git (deterministic, no LLM parsing):
    ```
    commit_hash   = git rev-parse HEAD
    exit_code     = codex return code
@@ -392,8 +377,8 @@ Minimum required sections (example structure):
    diff_lines    = git diff HEAD~1 --stat         # if HEAD~1 exists
    ```
    Edge case: if this is the first commit (no HEAD~1), use `git diff --cached` or `git show --stat HEAD` instead.
-4. On success (exit 0 + new commit exists): set `task.sub_step: verify`
-5. On failure (nonzero exit or no new commit): set `last_result.ok: false`, `CYCLE_FAIL`
+5. On success (exit 0 + new commit exists): set `task.sub_step: verify`
+6. On failure (nonzero exit or no new commit): set `last_result.ok: false`, `CYCLE_FAIL`
 
 ### `verify_task` (execute phase)
 
