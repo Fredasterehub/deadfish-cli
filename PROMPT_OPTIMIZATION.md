@@ -145,8 +145,9 @@
 ### P9 — LLM Verification (Claude Code → Sub-agents)
 - **Quand:** Phase `execute`, sub_step `verify`, Stage 2 (si verify.sh PASS)
 - **Modèle:** Claude Opus 4.5 sub-agents via Task tool
-- **Concept:** Sentinel Verdict DSL, un sub-agent par AC
-- **Status:** 🔲 À optimiser (Ralph: evidence bundles + DET:/LLM: skip logic)
+- **Prompt:** `.pipe/p9/P9_VERIFY_CRITERION.md`
+- **Concept:** Per-criterion sub-agent verification with three-level check (Exists → Substantive → Wired from GSD). One sub-agent per LLM: criterion, parallel fan-out (up to 7). Evidence bundles (~4K tokens): verify.sh JSON + git stat + relevant diff hunks + task context. Block-only sentinel VERDICT output. Conservative default (uncertain → NO). Pre-parse regex + one format-repair retry. DET: criteria auto-skip. Untagged → LLM: with warning.
+- **Status:** ✅ Implemented (commit `d8b073c`, dual-brain synthesis + 3 review rounds)
 
 ### P10 — Format-Repair Retry
 - **Quand:** Quand extract_plan.py ou build_verdict.py fail
