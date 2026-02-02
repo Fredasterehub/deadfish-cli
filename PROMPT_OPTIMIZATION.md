@@ -3,7 +3,7 @@
 > Ce fichier track la progression de l'optimisation de tous les prompts du pipeline deadf(ish).
 > Lire ce fichier + CLAUDE.md suffit pour reprendre le travail dans un contexte vide.
 
-## Status: EN COURS (P2-P5 restructure complete, P6+ remaining)
+## Status: ✅ COMPLETE — All 13 prompts (P1-P12 + P9.5) optimized
 
 ## Méthodologie
 1. Inventorier tous les prompts (P1-P11) ✅
@@ -161,14 +161,14 @@
 - **Modèle:** Tier 1: same model as original. Tier 2: GPT-5.2-high diagnostic agent
 - **Prompts:** `.pipe/p10/P10_FORMAT_REPAIR.md` (Tier 1), `.pipe/p10/P10_AUTO_DIAGNOSE.md` (Tier 2)
 - **Concept:** 3-tier escalation: Tier 1 = universal format-repair template with per-block FORMAT_CONTRACT injection, 9-item repair checklist, 16-entry common fixes cookbook, one retry max. Tier 2 = auto-diagnose agent (GPT-5.2-high) that reads parser source + both failed outputs, either fixes the block or reports structural mismatch → queued tooling repair task. Tier 3 = per-block failure policy (planner→CYCLE_FAIL, verdict→NEEDS_HUMAN, reflect→non-fatal, QA_REVIEW→accept with warnings). Empty output guard (<50 chars → skip P10). Traceback detection (skip P10 on parser bugs). P10 attempts tracked separately from task.retry_count.
-- **Status:** ✅ Implemented (Tier 1: commit `244aa1e`, Tier 2+3: this commit)
+- **Status:** ✅ Implemented (Tier 1: commit `244aa1e`, Tier 2+3: commit `dbaf2c0`)
 
 ### P11 — QA Review (Track-Level Quality Gate)
 - **Quand:** After last task's reflect, before track completion (sub_step: qa_review)
 - **Modèle:** GPT-5.2 (primary) via Codex MCP, Claude Opus 4.5 (second opinion on FAIL+HIGH)
 - **Prompt:** `.pipe/p11/P11_QA_REVIEW.md`
 - **Concept:** Track-level holistic review enforcing living docs compliance, cross-task consistency, architectural coherence, scope sanity, safety, and track completeness. 6 categories (C0-C5), fixed-shape QA_REVIEW sentinel block with FINDINGS_COUNT/REMEDIATION_COUNT. Default ON with smart skips (single-task tracks, empty docs, trivial diffs). Bounded remediation (max 1 task, then accept with warnings). Second opinion from Opus on FAIL+HIGH findings. C5 CRITICAL safety findings cannot be casually overridden. Integrated via DECIDE table row 13.5 with explicit state transitions.
-- **Status:** ✅ Implemented (this commit, dual-brain synthesis + 2 GPT-5.2 review rounds + Opus QA)
+- **Status:** ✅ Implemented (commit `dbaf2c0`, dual-brain synthesis + 2 GPT-5.2 review rounds + Opus QA)
 
 ### P12 — Codebase Mapper / Brownfield Detection (Preflight → Claude Code sub-agents)
 - **Quand:** Phase `research`, before P2, when brownfield detected
@@ -218,11 +218,11 @@ Each session follows the structured flow:
 | 3 | P3 — pick_track | ✅ Implemented — phase-aware sentinel TRACK (`1d8c237`) |
 | 4 | P4 — create_spec | ✅ Implemented — JIT spec sentinel SPEC (`1d8c237`) |
 | 5 | P5 — create_plan | ✅ Implemented — plans-as-prompts sentinel PLAN (`1d8c237`) |
-| 6 | P6 — generate_task | 🔄 **NEXT** |
-| 7 | P7 — implement_task | 🔲 |
-| 8 | P9 — LLM Verification | 🔲 |
-| 9 | P10 — Format-Repair Retry + Tier 2 Auto-Diagnose | ✅ Tier 2+3 added (this commit) |
-| 10 | P11 — QA Review | ✅ Implemented (this commit) |
+| 6 | P6 — generate_task | ✅ Implemented (`7d855e1`) |
+| 7 | P7 — implement_task | ✅ Implemented (`4e0631e`) |
+| 8 | P9 — LLM Verification | ✅ Implemented (`d8b073c`) |
+| 9 | P10 — Format-Repair Retry + Tier 2 Auto-Diagnose | ✅ Tier 2+3 added (`dbaf2c0`) |
+| 10 | P11 — QA Review | ✅ Implemented (`dbaf2c0`) |
 | — | P8 — verify.sh | ✅ Already solid |
 | — | P1 — Cycle Kick | ✅ Implemented |
 
