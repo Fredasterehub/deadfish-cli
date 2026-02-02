@@ -156,10 +156,11 @@
 - **Status:** ✅ Implemented (commit `233dbf5`, dual-brain synthesis + 2 review rounds)
 
 ### P10 — Format-Repair Retry
-- **Quand:** Quand extract_plan.py ou build_verdict.py fail
-- **Modèle:** Même que le prompt original
-- **Concept:** One-retry-max avec erreur exacte
-- **Status:** 🔲 À optimiser (brainstorm)
+- **Quand:** When any sentinel parser rejects LLM output (extract_plan.py, pre-parse regex for VERDICT/REFLECT)
+- **Modèle:** Same model as original (same nonce, same cycle)
+- **Prompt:** `.pipe/p10/P10_FORMAT_REPAIR.md`
+- **Concept:** Universal format-repair template with per-block FORMAT_CONTRACT injection. 9-item repair checklist (escape/path guards), 16-entry common fixes cookbook. One retry max. Per-block failure policy: planner→CYCLE_FAIL, verdict→NEEDS_HUMAN, reflect→non-fatal. Empty output guard (<50 chars → skip P10). Traceback detection (skip P10 on parser bugs). P10 attempts tracked separately from task.retry_count.
+- **Status:** ✅ Implemented (commit `244aa1e`, dual-brain synthesis + 2 review rounds)
 
 ### P11 — QA Review (Optionnel)
 - **Quand:** Post-implémentation, validation croisée
