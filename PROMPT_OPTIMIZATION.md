@@ -124,15 +124,17 @@
 
 ### P6 — generate_task (Claude Code → GPT-5.2)
 - **Quand:** Phase `execute`, sub_step `generate`
-- **Modèle:** GPT-5.2 via `codex exec`
-- **Concept:** Sentinel DSL task generation
-- **Status:** 🔲 À optimiser (same as P5)
+- **Modèle:** GPT-5.2 via Codex MCP
+- **Prompt:** `.pipe/p6/P6_GENERATE_TASK.md`
+- **Concept:** Sentinel DSL task generation with drift detection. Happy path: next task from PLAN. Drift path: re-plan if plan_base_commit diverged. Retry path: inject retry context from failed verify. Hard stops: 3 consecutive failures → needs_human.
+- **Status:** ✅ Implemented (commit `7d855e1`)
 
 ### P7 — implement_task (Claude Code → GPT-5.2-Codex)
 - **Quand:** Phase `execute`, sub_step `implement`
 - **Modèle:** GPT-5.2-Codex (high reasoning) via `codex exec --approval-mode full-auto`
-- **Concept:** "Feed the full spec" — TASK.md complet + fichiers existants
-- **Status:** 🔲 À optimiser (Ralph: 0a/0b/0c structure + self-backpressure verify.sh)
+- **Prompt:** `.pipe/p7/P7_IMPLEMENT_TASK.md`
+- **Concept:** 5-section template (IDENTITY/TASK PACKET/DIRECTIVES/GUARDRAILS/DONE CONTRACT). No planning preamble. TASK packet injected verbatim from P6. Batch FILES_TO_LOAD reads first. 3-iteration fix cap with best-passing fallback. Fixed reasoning_effort=high (no xhigh). Git-as-IPC. Stateless (retry via TASK packet). Scope escape valve via TODO comments.
+- **Status:** ✅ Implemented (commit `4e0631e`, reviewed by Opus + GPT-5.2)
 
 ### P8 — verify.sh (Déterministe)
 - **Quand:** Phase `execute`, sub_step `verify`, Stage 1
