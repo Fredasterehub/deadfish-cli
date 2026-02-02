@@ -1,0 +1,32 @@
+# deadfish-cli
+
+> Autonomous dev pipeline that runs plan → implement → verify → commit loops using CLI tools (Bash + Python + Claude Code + Codex). No framework, no bots — just filesystem artifacts and deterministic verification.
+
+deadfish-cli enforces strict role separation across five actors: Ralph (bash loop controller), Claude Code Orchestrator (reads state, dispatches work), GPT-5.2 Planner (decomposes tasks via Codex MCP), GPT-5.2-Codex Implementer (writes code via codex exec), and Verifier (verify.sh + LLM review). State lives in YAML files (STATE.yaml for position, POLICY.yaml for rules). All cycle artifacts persist to `.deadf/logs/`. The pipeline supports three execution modes: yolo (full autonomy), hybrid (human checkpoints at track boundaries), and interactive (human approves every task).
+
+## Docs
+
+- [README](README.md): Project overview, setup, configuration, architecture
+- [CLAUDE.md](CLAUDE.md): Orchestrator contract — all agent behavior, phases, sentinel protocol, cycle semantics
+- [METHODOLOGY.md](METHODOLOGY.md): Design methodology — core principles, pipeline components, workflow
+- [VISION.md](VISION.md): Problem statement, solution scope, success metrics, MVP boundaries
+- [ROADMAP.md](ROADMAP.md): Port roadmap with tracks, milestones, and done criteria
+- [POLICY.yaml](POLICY.yaml): Execution modes, escalation thresholds, rollback policy, verification rules
+
+## Code
+
+- [ralph.sh](ralph.sh): Loop controller — cycle dispatch, timeout enforcement, lock management, log rotation
+- [verify.sh](verify.sh): Verification gate — runs tests/lint/build, produces structured JSON verdict
+- [extract_plan.py](extract_plan.py): Plan parser — extracts structured task sequences from planner output
+- [build_verdict.py](build_verdict.py): Verdict builder — combines deterministic and LLM verification into final pass/fail
+
+## Config
+
+- [STATE.yaml](STATE.yaml): Current pipeline position (track, task, phase, iteration, baselines)
+- [POLICY.yaml](POLICY.yaml): Mode definitions, notification rules, escalation thresholds, rollback policy
+- [.mcp.json](.mcp.json): MCP server configuration for Codex tool access
+
+## Optional
+
+- [examples/](examples/): Project structure examples and templates
+- [LICENSE](LICENSE): MIT license

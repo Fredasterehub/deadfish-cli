@@ -262,6 +262,32 @@ Contributions welcome! The pipeline is designed to be extensible:
 
 ---
 
+## 🤖 For LLMs / AI Agents
+
+**Quick context for AI assistants helping users with this project:**
+
+> deadfish-cli is an autonomous dev pipeline that runs a plan → implement → verify → commit loop using CLI tools. It uses Bash (ralph.sh) as loop controller, Claude Code CLI as orchestrator, GPT-5.2 via Codex MCP as planner, and GPT-5.2-Codex as implementer. The entry point is `ralph.sh <project_path>`.
+
+### Key files to read first
+- `CLAUDE.md` — Orchestrator contract defining all agent behavior, phases, and sentinel protocol
+- `ralph.sh` — Loop controller: cycle dispatch, timeouts, locks, log rotation
+- `POLICY.yaml` — Execution modes (yolo/hybrid/interactive), escalation thresholds, rollback policy
+- `STATE.yaml` — Current pipeline position: active track, task, phase, iteration count
+- `verify.sh` — Verification gate: runs tests, lint, build; produces structured JSON verdict
+
+### Common tasks
+- **Run pipeline:** `./ralph.sh /path/to/project [mode]`
+- **Check state:** `cat STATE.yaml | yq .`
+- **View logs:** `ls .deadf/logs/`
+- **Run verification only:** `./verify.sh`
+
+### Architecture in one paragraph
+Ralph (bash) runs an infinite loop: each cycle it dispatches to Claude Code CLI which reads STATE.yaml, decides the next action, and delegates to either GPT-5.2 (planning via Codex MCP) or GPT-5.2-Codex (implementation via codex exec). After implementation, verify.sh runs deterministic checks (tests/lint/build) and an LLM reviewer produces a combined verdict. On PASS, the orchestrator commits and advances state. On FAIL, it retries or escalates. All state lives in YAML files and all artifacts persist to `.deadf/logs/`.
+
+> 📄 See [`llms.txt`](llms.txt) for the full machine-readable project context.
+
+---
+
 ## 📄 License
 
 [MIT](LICENSE) © deadfish contributors
