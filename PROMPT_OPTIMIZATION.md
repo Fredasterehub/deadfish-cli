@@ -91,7 +91,8 @@
 - **Quand:** Chaque itération du loop
 - **Modèle:** Claude Opus 4.5 (via `claude --print`)
 - **Concept:** Trigger mécanique minimal, CLAUDE.md fait le vrai travail
-- **Status:** 🔲 À optimiser (Ralph insights: idempotent, cd constraint, reply token constraint)
+- **Implémentation:** `.pipe/p1/P1_CYCLE_KICK.md`, `.pipe/p1/p1-cron-kick.sh`
+- **Status:** ✅ Implemented
 
 ### P2 — seed_docs / Brainstorm Session (Claude Code → GPT-5.2)
 - **Quand:** Phase `research`
@@ -223,7 +224,7 @@ Each session follows the structured flow:
 | 9 | P10 — Format-Repair Retry + Tier 2 Auto-Diagnose | ✅ Tier 2+3 added (this commit) |
 | 10 | P11 — QA Review | ✅ Implemented (this commit) |
 | — | P8 — verify.sh | ✅ Already solid |
-| — | P1 — Cycle Kick | 🔲 À optimiser |
+| — | P1 — Cycle Kick | ✅ Implemented |
 
 ### Phase 3: Integration Testing
 Run the optimized pipeline on a real project, verify improvements.

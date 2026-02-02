@@ -1118,23 +1118,25 @@ DEADF_CYCLE <cycle_id>
 
 ---
 
-## The Ralph Loop (CLI Adaptation)
+## Cycle Kick / Launcher (CLI Adaptation)
 
-ralph.sh calls Claude Code CLI instead of Clawdbot sessions:
+Canonical kick template: `.pipe/p1/P1_CYCLE_KICK.md`.
+Canonical trigger sentinel: `DEADF_CYCLE <cycle_id>`.
 
+Preferred launcher: `.pipe/p1/p1-cron-kick.sh`. Ralph/cron should call the launcher or construct the kick using the canonical template.
+
+Dual-lock model:
+- Process lock: `.deadf/cron.lock` held by the launcher for the full orchestrator runtime.
+- State lock: `STATE.yaml.flock` held by the orchestrator for atomic R-M-W (VALIDATE + RECORD).
+
+Early-exit / output contract:
+- If the orchestrator is invoked, it MUST end with exactly one of: `CYCLE_OK | CYCLE_FAIL | DONE` as the last line.
+- If the launcher skips (no orchestrator spawned), it MUST emit one structured `skip` log line (exit code + reason).
+
+Reference CLI invocation (when launching directly):
 ```bash
-# Core cycle kick (replaces clawdbot session send):
-claude --print --allowedTools "Read,Write,Edit,Bash,Task,Glob,Grep" "DEADF_CYCLE $CYCLE_ID
-project: $PROJECT_PATH
-mode: $MODE
-Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DONE"
+claude --print --allowedTools "Read,Write,Edit,Bash,Task,Glob,Grep" "<kick message from P1_CYCLE_KICK.md>"
 ```
-
-**Key differences from pipeline version:**
-- `claude --print` outputs to stdout (ralph.sh captures for logging; state polling is authoritative)
-- `--allowedTools "Read,Write,Edit,Bash,Task,Glob,Grep"` enables full filesystem and exec access
-- `--continue` can be added for session persistence across cycles
-- No Discord dependency — all communication via stdout and filesystem
 
 ---
 
