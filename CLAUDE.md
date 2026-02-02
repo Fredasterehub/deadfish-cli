@@ -785,17 +785,33 @@ Example:
 ]
 ```
 
-### Format-Repair Retry
+### P10: Format-Repair (Universal; One Retry Max)
 
-**Planner (extract_plan.py):** if it exits 1, send the stderr to the same LLM with a single repair request and retry once (same nonce). If it still fails → `CYCLE_FAIL`.
+When a sentinel block fails parsing/validation, the orchestrator MAY attempt a single format-repair retry using:
+- Template: `.pipe/p10/P10_FORMAT_REPAIR.md`
+- Inputs: verbatim parser/validator error + verbatim original output + injected per-block format contract
+- Constraints: same nonce (same cycle), same model, one retry maximum
+- Output: block-only corrected sentinel block (no prose, no code fences)
 
-**Verifier (build_verdict.py):** do **not** key retries on exit code (it exits 0 on per-criterion parse errors).
-Instead, for each raw sub-agent response:
-1. Pre-parse regex validation (exactly one opener/closer for the expected criterion+nonce, and exactly two payload lines: `ANSWER=YES|NO` + `REASON="..."` with no extra lines outside the block).
-2. If validation fails: send **one** repair retry to the same sub-agent: *"Your output could not be parsed. Please output ONLY the corrected verdict block, no other text."* (same nonce).
-3. If still malformed: mark that criterion `NEEDS_HUMAN` (no further retries).
+Track P10 attempts separately from `task.retry_count` (policy + metrics/logging only).
 
-**One retry maximum per output.**
+#### Guards (skip P10)
+- If original output is `< 50 chars`: skip P10; follow the per-block failure policy.
+- If the error contains a Python traceback/crash: skip P10; follow the per-block failure policy (tooling bug).
+
+#### Truncation
+- If original output is > 8K chars: include first 4K + last 4K with `"[...truncated...]"`.
+
+#### Per-block trigger & failure policy
+
+| Block Type | Validation Mechanism (Current) | Invoke P10 When | After P10 Retry Fails |
+|-----------|---------------------------------|-----------------|------------------------|
+| PLAN (single-task) | `extract_plan.py` exit 1 + actionable stderr | parse fails with `ParseError` | `CYCLE_FAIL` |
+| TRACK / SPEC / multi-PLAN | **not yet supported by deterministic parser** | N/A (skip P10 until parser exists) | `CYCLE_FAIL` (if validation required) |
+| VERDICT (per-criterion) | pre-parse regex/shape validation (don’t key on `build_verdict.py` exit code) | verdict block malformed for that criterion | That criterion → `NEEDS_HUMAN` |
+| REFLECT | grammar validation per `.pipe/p9.5/P9_5_REFLECT.md` | reflect block malformed | Non-fatal degrade: treat as `ACTION=NOP`, log warning |
+
+**Parser mismatch warning:** `extract_plan.py` does not match TRACK/SPEC/multi-task PLAN formats today. Do not invoke P10 for those blocks until a deterministic parser exists.
 
 ---
 
