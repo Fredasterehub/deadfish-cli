@@ -395,23 +395,29 @@ If `verify.sh.pass == false` → FAIL immediately. Do NOT run LLM verifier.
 
 **Stage 2: LLM verification (only if verify.sh passes)**
 
-**DET:/LLM: Skip Logic:** Acceptance criteria prefixed with `DET:` are auto-passed when verify.sh reports `"pass": true` — they map exclusively to verify.sh's 6 checks. Do NOT spawn LLM verifiers for `DET:` criteria. Only spawn LLM sub-agents for `LLM:` prefixed criteria.
+**Tagging rules:** `DET:` criteria are auto-passed when verify.sh reports `"pass": true` — they map exclusively to verify.sh's 6 checks. `LLM:` criteria require sub-agent verification. Untagged criteria are treated as `LLM:` and MUST emit an orchestrator warning log.
 
-For each `LLM:` acceptance criterion:
-1. Build a **per-criterion evidence bundle** (minimal context):
-   - The `ACn` text
+**DET fast-path:** If `verify.sh.pass == true` and there are **no** LLM criteria after tagging (including untagged → LLM), skip P9 entirely and treat LLM verification as PASS.
+
+For each LLM acceptance criterion (tagged or untagged):
+1. Build a **per-criterion evidence bundle** using `.pipe/p9/P9_VERIFY_CRITERION.md` (target ~4K tokens per bundle):
+   - Criterion id + verbatim text
+   - Task id/title/summary + planned FILES list
    - verify.sh JSON excerpt: `pass`, `test_summary`, `lint_exit`, `diff_lines`, `secrets_found`, `git_clean`
-   - `git show --stat` (ALL changed files, not just planned ones)
-   - If files outside the plan's FILES list were modified, include their diff hunks too
-     and instruct the sub-agent: "Files outside the planned scope were modified. If any
-     out-of-scope change is non-trivial (not just formatting/imports), answer NO with
-     reason 'out-of-scope modification: {filename}'."
-   - Diff hunks for files relevant to this criterion
-   - Test output (if applicable)
-2. Spawn sub-agent via the **Task tool** with per-criterion prompt + evidence bundle
-3. Sub-agent prompt includes: "If required evidence is missing, answer NO with reason 'insufficient evidence'. Never guess."
-4. Each sub-agent produces one verdict block
-5. Collect all raw responses
+   - `git show --stat` (full)
+   - Relevant diff hunks (criterion-specific)
+   - Out-of-scope diff hunks section (if any out-of-scope edits occurred) + rule: non-trivial out-of-scope change → `ANSWER=NO` with `out-of-scope modification: <path>`
+   - Test output section (if applicable)
+   - Truncation notice (if any section was cut); if decisive hunks may be missing → sub-agent MUST `ANSWER=NO` with `insufficient evidence: truncated`
+   - Mapping heuristic: keyword match against planned FILES rationale; fallback to all hunks; always include likely wiring surfaces if changed (index/init modules, registries, routers, CLI entrypoints, config)
+2. Spawn a sub-agent via the **Task tool** with the P9 template + evidence bundle (block-only output).
+3. Each sub-agent produces exactly one verdict block (no prose).
+4. Collect all raw responses.
+5. **Pre-parse regex validation (required):** before `build_verdict.py`, validate each response has:
+   - exactly one opener and one closer for that criterion id and nonce
+   - exactly two payload lines: `ANSWER=YES|NO` and `REASON="..."`
+   - no extra lines outside the block
+   If validation fails: send **one** repair retry to the same sub-agent: “Your output could not be parsed. Please output ONLY the corrected verdict block, no other text.” (same nonce). If still malformed: mark that criterion `NEEDS_HUMAN`. Do not retry more than once.
 
 **Sub-agent dispatch (Task tool):**
 ```
@@ -644,6 +650,7 @@ ESTIMATED_DIFF=<positive integer>
   5. No secrets detected
   6. Git tree clean (no uncommitted files)
 - `LLM: ...` — LLM-judged: requires sub-agent reasoning (code quality, design, documentation tone, file existence, specific output matching, anything NOT in the 6 checks above)
+- Untagged criteria — Treat as `LLM:` and **log a warning** in orchestrator logs (fail-safe default).
 
 Examples:
 - `id=AC1 text="DET: All tests pass with ≥1 new test added"`
@@ -653,7 +660,7 @@ Examples:
 
 **Important:** File existence and content checks are `LLM:`, not `DET:` — verify.sh does not check specific file contents.
 
-The orchestrator uses these prefixes to skip LLM verification for `DET:` criteria (auto-pass if verify.sh passed).
+The orchestrator uses these prefixes to skip LLM verification for `DET:` criteria (auto-pass if verify.sh passed). Untagged criteria are treated as `LLM:` and must log a warning.
 
 Parse with: `python3 extract_plan.py --nonce <nonce> < raw_output`
 
@@ -683,8 +690,8 @@ Only the `ESTIMATED_DIFF` line and `path=...` tokens are strictly required for v
 
 ```
 <<<VERDICT:V1:{criterion_id}:NONCE={nonce}>>>
-ANSWER=YES or NO
-REASON="<single sentence>"
+ANSWER=YES
+REASON="One sentence, ≤500 chars, naming the specific gap or confirmation."
 <<<END_VERDICT:{criterion_id}:NONCE={nonce}>>>
 ```
 
@@ -693,6 +700,15 @@ Parse with: `python3 build_verdict.py --nonce <nonce> --criteria AC1,AC2,...`
 **build_verdict.py stdin format:**
 - JSON array of pairs: `[["AC1", "<raw response text>"], ["AC2", "<raw response text>"], ...]`
 - Each raw response string must contain **exactly one** sentinel verdict block for that criterion.
+- Nonce format is strict: `^[0-9A-F]{6}$`
+
+**Verdict block rules (parser-safe):**
+- Choose exactly one: `ANSWER=YES` or `ANSWER=NO` (unquoted).
+- Inside the block there must be **exactly two lines**: `ANSWER=...` then `REASON="..."` (no other keys, no blank lines).
+- `REASON` must be double-quoted, single line, non-empty, ≤500 chars.
+- Do **not** include `"` inside `REASON` (avoid escapes); prefer `'` or backticks for symbols/filenames.
+- Do **not** use backslashes; use forward slashes in paths.
+- Output must be block-only (no prose outside the block). No code fences.
 
 Example:
 ```
@@ -704,13 +720,15 @@ Example:
 
 ### Format-Repair Retry
 
-If `extract_plan.py` or `build_verdict.py` exits 1:
-1. Read stderr (contains specific error with line number)
-2. Send to same LLM: *"Your output could not be parsed. Error: {stderr}. Please output ONLY the corrected block, no other text."*
-3. Parse again (**same nonce**)
-4. If still fails: `CYCLE_FAIL` (planner) or `NEEDS_HUMAN` (verifier)
+**Planner (extract_plan.py):** if it exits 1, send the stderr to the same LLM with a single repair request and retry once (same nonce). If it still fails → `CYCLE_FAIL`.
 
-**One retry maximum.**
+**Verifier (build_verdict.py):** do **not** key retries on exit code (it exits 0 on per-criterion parse errors).
+Instead, for each raw sub-agent response:
+1. Pre-parse regex validation (exactly one opener/closer for the expected criterion+nonce, and exactly two payload lines: `ANSWER=YES|NO` + `REASON="..."` with no extra lines outside the block).
+2. If validation fails: send **one** repair retry to the same sub-agent: *"Your output could not be parsed. Please output ONLY the corrected verdict block, no other text."* (same nonce).
+3. If still malformed: mark that criterion `NEEDS_HUMAN` (no further retries).
+
+**One retry maximum per output.**
 
 ---
 
@@ -903,9 +921,7 @@ Use the Task tool:
 
 ### Sub-Agent Output Contract
 
-Each verification sub-agent MUST return:
-1. The sentinel verdict block (for `build_verdict.py` parsing)
-2. Raw reasoning (ignored by parser, but preserved in logs)
+Each verification sub-agent MUST return **only** the sentinel verdict block (block-only output, no prose).
 
 ---
 
