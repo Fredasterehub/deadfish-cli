@@ -155,18 +155,19 @@
 - **Concept:** Conductor-inspired living docs update. After each completed task: extract lessons learned, update PATTERNS.md/PITFALLS.md/TECH_STACK.md with new conventions/gotchas/deps discovered during implementation. Re-evaluate project understanding based on what was just built. Feed enriched context back into next cycle. Dynamic vs static — docs evolve with the codebase.
 - **Status:** ✅ Implemented (commit `233dbf5`, dual-brain synthesis + 2 review rounds)
 
-### P10 — Format-Repair Retry
-- **Quand:** When any sentinel parser rejects LLM output (extract_plan.py, pre-parse regex for VERDICT/REFLECT)
-- **Modèle:** Same model as original (same nonce, same cycle)
-- **Prompt:** `.pipe/p10/P10_FORMAT_REPAIR.md`
-- **Concept:** Universal format-repair template with per-block FORMAT_CONTRACT injection. 9-item repair checklist (escape/path guards), 16-entry common fixes cookbook. One retry max. Per-block failure policy: planner→CYCLE_FAIL, verdict→NEEDS_HUMAN, reflect→non-fatal. Empty output guard (<50 chars → skip P10). Traceback detection (skip P10 on parser bugs). P10 attempts tracked separately from task.retry_count.
-- **Status:** ✅ Implemented (commit `244aa1e`, dual-brain synthesis + 2 review rounds)
+### P10 — Format-Repair Retry + Auto-Diagnose (3-Tier Escalation)
+- **Quand:** When any sentinel parser rejects LLM output (extract_plan.py, pre-parse regex for VERDICT/REFLECT/QA_REVIEW)
+- **Modèle:** Tier 1: same model as original. Tier 2: GPT-5.2-high diagnostic agent
+- **Prompts:** `.pipe/p10/P10_FORMAT_REPAIR.md` (Tier 1), `.pipe/p10/P10_AUTO_DIAGNOSE.md` (Tier 2)
+- **Concept:** 3-tier escalation: Tier 1 = universal format-repair template with per-block FORMAT_CONTRACT injection, 9-item repair checklist, 16-entry common fixes cookbook, one retry max. Tier 2 = auto-diagnose agent (GPT-5.2-high) that reads parser source + both failed outputs, either fixes the block or reports structural mismatch → queued tooling repair task. Tier 3 = per-block failure policy (planner→CYCLE_FAIL, verdict→NEEDS_HUMAN, reflect→non-fatal, QA_REVIEW→accept with warnings). Empty output guard (<50 chars → skip P10). Traceback detection (skip P10 on parser bugs). P10 attempts tracked separately from task.retry_count.
+- **Status:** ✅ Implemented (Tier 1: commit `244aa1e`, Tier 2+3: this commit)
 
-### P11 — QA Review (Optionnel)
-- **Quand:** Post-implémentation, validation croisée
-- **Modèle:** GPT-5.2 via `codex exec`
-- **Concept:** Multi-model cross-validation
-- **Status:** 🔲 À optimiser (brainstorm)
+### P11 — QA Review (Track-Level Quality Gate)
+- **Quand:** After last task's reflect, before track completion (sub_step: qa_review)
+- **Modèle:** GPT-5.2 (primary) via Codex MCP, Claude Opus 4.5 (second opinion on FAIL+HIGH)
+- **Prompt:** `.pipe/p11/P11_QA_REVIEW.md`
+- **Concept:** Track-level holistic review enforcing living docs compliance, cross-task consistency, architectural coherence, scope sanity, safety, and track completeness. 6 categories (C0-C5), fixed-shape QA_REVIEW sentinel block with FINDINGS_COUNT/REMEDIATION_COUNT. Default ON with smart skips (single-task tracks, empty docs, trivial diffs). Bounded remediation (max 1 task, then accept with warnings). Second opinion from Opus on FAIL+HIGH findings. C5 CRITICAL safety findings cannot be casually overridden. Integrated via DECIDE table row 13.5 with explicit state transitions.
+- **Status:** ✅ Implemented (this commit, dual-brain synthesis + 2 GPT-5.2 review rounds + Opus QA)
 
 ### P12 — Codebase Mapper / Brownfield Detection (Preflight → Claude Code sub-agents)
 - **Quand:** Phase `research`, before P2, when brownfield detected
@@ -219,8 +220,8 @@ Each session follows the structured flow:
 | 6 | P6 — generate_task | 🔄 **NEXT** |
 | 7 | P7 — implement_task | 🔲 |
 | 8 | P9 — LLM Verification | 🔲 |
-| 9 | P10 — Format-Repair Retry | 🔲 |
-| 10 | P11 — QA Review | 🔲 |
+| 9 | P10 — Format-Repair Retry + Tier 2 Auto-Diagnose | ✅ Tier 2+3 added (this commit) |
+| 10 | P11 — QA Review | ✅ Implemented (this commit) |
 | — | P8 — verify.sh | ✅ Already solid |
 | — | P1 — Cycle Kick | 🔲 À optimiser |
 

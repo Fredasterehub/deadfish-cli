@@ -135,6 +135,7 @@ Read `phase` and `task.sub_step` from STATE.yaml. The action is deterministic.
 | 11 | `execute` | `task.sub_step: implement` | `implement_task` |
 | 12 | `execute` | `task.sub_step: verify` | `verify_task` |
 | 13 | `execute` | `task.sub_step: reflect` | `reflect` |
+| 13.5 | `execute` | `task.sub_step: qa_review` | `qa_review` |
 | 14 | `complete` | — | `summarize` |
 
 **One cycle = one action. No chaining.**
@@ -497,7 +498,21 @@ On NEEDS_HUMAN: set `phase: needs_human` (all modes)
    ```
 4. Advance to next task or track:
    - If more tasks in track: `task.sub_step: generate`, increment `task_current`
-   - If track complete: `track.status: complete`, move to `tracks_completed`, set `phase: select-track`
+   - If track complete (`task_current == task_total`):
+     - Run smart-skip gate (deterministic; no LLM):
+       ```
+       skip_qa = (
+         POLICY.qa_review.enabled == false
+         OR track.task_total == 1 AND POLICY.qa_review.skip_single_task_tracks == true
+         OR total_diff_lines < POLICY.qa_review.skip_trivial_diffs
+         OR .deadf/docs/ is empty AND POLICY.qa_review.skip_empty_docs == true
+       )
+       ```
+     - If `skip_qa`:
+       - `track.status: complete`, move to `tracks_completed`, set `phase: select-track`
+     - Else:
+       - `task.sub_step: qa_review`
+       - DO NOT set `track.status: complete` yet
    - If all tracks done: `phase: complete`
 5. Reset: `task.retry_count: 0`, `loop.stuck_count: 0`, `task.replan_attempted: false`
 
@@ -529,6 +544,71 @@ observations:
     entry: "jest.mock must precede import in ESM"
     timestamp: "2026-02-01T15:30:00Z"
 ```
+
+### `qa_review` (execute phase)
+
+Purpose: Track-level holistic QA review runs after the last task’s reflect and before track completion.
+
+Inputs:
+- `STATE.yaml`
+- Track `SPEC.md`
+- Track `PLAN.md`
+- All `TASK_{NNN}.md` files for the track
+- Living docs under `.deadf/docs/` (if present)
+- Git history/diff from `track.plan_base_commit..HEAD`
+- Template: `.pipe/p11/P11_QA_REVIEW.md`
+
+Evidence bundle (hard caps):
+- `combined_git_diff_stat`: `git diff {track.plan_base_commit}..HEAD --stat`
+- `sampled_diff_hunks`: `git diff {track.plan_base_commit}..HEAD` capped to ~8K tokens
+- `task_summaries_list`: ≤150 tokens per task; ≤750 tokens total for first 5 tasks
+- `living_docs_content`: `.deadf/docs/` (all present docs; use existing P9.5 per-doc token budgets)
+- `spec_content`: `SPEC.md`
+- `plan_expected_files`: FILES entries from `PLAN.md`
+- Total evidence budget: ≤15K tokens
+
+Execution:
+1. Dispatch to GPT-5.2 using `.pipe/p11/P11_QA_REVIEW.md`.
+2. Parse exactly one `QA_REVIEW` sentinel block:
+   a. Exactly one opener/closer with matching nonce
+   b. `FINDINGS_COUNT` matches number of FINDINGS items
+   c. `REMEDIATION_COUNT` matches number of REMEDIATION items
+   d. Fixed field order; no extra keys; no blank lines; no tabs
+3. On parse failure:
+   - Tier 1: run `.pipe/p10/P10_FORMAT_REPAIR.md` one retry (same nonce)
+   - If Tier 1 still fails: follow the P10 3-tier escalation policy (Tier 2 auto-diagnose; then Tier 3 per-block policy)
+
+State transitions (explicit):
+
+On PASS:
+```yaml
+track.status: complete
+phase: select-track
+task.sub_step: null
+```
+
+On FAIL (first time; remediation not yet attempted):
+```text
+old_total = track.task_total
+track.task_total = old_total + 1
+track.task_current = old_total + 1
+task.sub_step = generate
+task.retry_count = 0
+track.qa_remediation = true
+```
+
+On FAIL (remediation already attempted; `track.qa_remediation == true`):
+```yaml
+track.status: complete
+phase: select-track
+task.sub_step: null
+```
+
+Additional behavior:
+- On FAIL with `RISK=HIGH`: request a second opinion from Opus on the top 1–3 CRITICAL/HIGH findings + relevant diff hunks + relevant living doc rules.
+- C5 CRITICAL arbitration rule: cannot override to PASS unless the second opinion explicitly states the finding is incorrect and references a specific safeguard in the diff/code.
+- If FAIL is confirmed: generate exactly one remediation task and proceed (bounded remediation).
+- If remediation already happened: accept with warnings and log findings to `.deadf/logs/qa_warnings.md` (append-only).
 
 ### `retry_task` (execute phase)
 
@@ -785,33 +865,112 @@ Example:
 ]
 ```
 
-### P10: Format-Repair (Universal; One Retry Max)
+### QA_REVIEW Block Format
 
-When a sentinel block fails parsing/validation, the orchestrator MAY attempt a single format-repair retry using:
+```
+<<<QA_REVIEW:V1:NONCE={nonce}>>>
+VERDICT=PASS|FAIL
+RISK=LOW|MEDIUM|HIGH
+C0=PASS|FAIL
+C1=PASS|FAIL
+C2=PASS|FAIL
+C3=PASS|FAIL
+C4=PASS|FAIL
+C5=PASS|FAIL
+FINDINGS_COUNT={N}
+FINDINGS:
+- severity=CRITICAL|MAJOR|MINOR category=C0|C1|C2|C3|C4|C5 file="path" issue="description"
+REMEDIATION_COUNT={N}
+REMEDIATION:
+- file="path" action="what to fix"
+NOTES="Brief summary of track quality. ≤500 chars."
+<<<END_QA_REVIEW:NONCE={nonce}>>>
+```
+
+QA_REVIEW block rules (parser-safe):
+- Fixed shape: FINDINGS and REMEDIATION sections are always present.
+- Field order is fixed (same as `.pipe/p11/P11_QA_REVIEW.md`).
+- No blank lines inside block; no tabs; no prose outside.
+- `FINDINGS_COUNT` and `REMEDIATION_COUNT` must equal the actual number of items.
+- If `VERDICT=FAIL`: `FINDINGS_COUNT >= 1` and `REMEDIATION_COUNT >= 1`.
+- R2 RULE: Never set `C*=FAIL` unless there exists ≥1 FINDINGS item with `category=C*` and `severity=MAJOR|CRITICAL`.
+
+POLICY.yaml (qa_review):
+```yaml
+qa_review:
+  enabled: true
+  skip_single_task_tracks: true
+  skip_trivial_diffs: 50
+  skip_empty_docs: true
+  max_remediation_tasks: 1
+  severity_threshold: MAJOR
+  second_opinion_on_high_risk: true
+  task_triggers: []
+```
+
+### P10: 3-Tier Escalation (Sentinel Parse/Validation Failures)
+
+When a sentinel block fails parsing/validation, the orchestrator follows a deterministic 3-tier policy:
+1. Tier 1: format-repair once
+2. Tier 2: auto-diagnose once (either FIXED output or MISMATCH report)
+3. Tier 3: per-block failure policy
+
+Tier 1 and Tier 2 are bounded to one attempt each. No loops.
+
+#### Tier 1 — Format Repair (Universal; One Retry Max)
+
 - Template: `.pipe/p10/P10_FORMAT_REPAIR.md`
 - Inputs: verbatim parser/validator error + verbatim original output + injected per-block format contract
 - Constraints: same nonce (same cycle), same model, one retry maximum
 - Output: block-only corrected sentinel block (no prose, no code fences)
 
-Track P10 attempts separately from `task.retry_count` (policy + metrics/logging only).
+Guards (skip Tier 1):
+- If original output is `< 50 chars`: skip Tier 1; follow Tier 3 per-block policy.
+- If the error contains a Python traceback/crash: skip Tier 1; follow Tier 3 per-block policy (tooling bug).
 
-#### Guards (skip P10)
-- If original output is `< 50 chars`: skip P10; follow the per-block failure policy.
-- If the error contains a Python traceback/crash: skip P10; follow the per-block failure policy (tooling bug).
-
-#### Truncation
+Truncation:
 - If original output is > 8K chars: include first 4K + last 4K with `"[...truncated...]"`.
 
-#### Per-block trigger & failure policy
+#### Tier 2 — Auto-Diagnose (Output Fix OR Structural Mismatch)
 
-| Block Type | Validation Mechanism (Current) | Invoke P10 When | After P10 Retry Fails |
-|-----------|---------------------------------|-----------------|------------------------|
-| PLAN (single-task) | `extract_plan.py` exit 1 + actionable stderr | parse fails with `ParseError` | `CYCLE_FAIL` |
-| TRACK / SPEC / multi-PLAN | **not yet supported by deterministic parser** | N/A (skip P10 until parser exists) | `CYCLE_FAIL` (if validation required) |
-| VERDICT (per-criterion) | pre-parse regex/shape validation (don’t key on `build_verdict.py` exit code) | verdict block malformed for that criterion | That criterion → `NEEDS_HUMAN` |
-| REFLECT | grammar validation per `.pipe/p9.5/P9_5_REFLECT.md` | reflect block malformed | Non-fatal degrade: treat as `ACTION=NOP`, log warning |
+Trigger: Tier 1 fails.
 
-**Parser mismatch warning:** `extract_plan.py` does not match TRACK/SPEC/multi-task PLAN formats today. Do not invoke P10 for those blocks until a deterministic parser exists.
+- Template: `.pipe/p10/P10_AUTO_DIAGNOSE.md`
+- Actor: GPT-5.2-high via Codex MCP / `codex exec`
+- Inputs: both parser errors, both outputs, authoritative format contract, and parser excerpt (relevant regex/function only)
+- Output (exactly one):
+  - `<<<DIAGNOSTIC:V1:FIXED>>> ... <<<END_DIAGNOSTIC:FIXED>>>` (contains a corrected sentinel block that must pass the parser as-is)
+  - `<<<DIAGNOSTIC:V1:MISMATCH>>> ... <<<END_DIAGNOSTIC:MISMATCH>>>` (structured mismatch report)
+- Role boundary: Tier 2 does NOT patch source code. It only fixes the output or diagnoses mismatch.
+- Budget note: the prompt has no internal timeout concept; the orchestrator enforces budgets and call limits.
+
+If Tier 2 returns FIXED:
+- Parse the corrected sentinel block.
+- If parsing still fails: proceed to Tier 3.
+
+If Tier 2 returns MISMATCH:
+- Queue tooling repair (see below).
+- Proceed to Tier 3 for the current cycle.
+
+#### Tier 3 — Per-Block Failure Policy
+
+| Block Type | Tier 1 | Tier 2 | Tier 3 |
+|-----------|--------|--------|--------|
+| PLAN / TRACK / SPEC | Format retry | Auto-diagnose | `CYCLE_FAIL` with diagnostic report |
+| VERDICT (per-criterion) | Format retry | Auto-diagnose | That criterion → `NEEDS_HUMAN` (continue other criteria) |
+| REFLECT | Format retry | Non-fatal degrade (`ACTION=NOP`, log warning) | Never reaches Tier 3 |
+| QA_REVIEW | Format retry | Auto-diagnose | Accept with warnings, log, complete track |
+
+Tooling repair queue (Tier 2 MISMATCH):
+1. Log the full diagnostic to `.deadf/logs/mismatch-{cycle_id}.md`
+2. Follow Tier 3 policy for the current cycle
+3. Queue a tooling-repair meta-task:
+   - Path: `.deadf/tooling-repairs/repair-{timestamp}.md`
+   - Contents: `COMPONENT`, `EXPLANATION`, `SUGGESTED_FIX`
+4. Tooling-repairs are picked up at next `select-track` phase (before normal track selection) and implemented by `gpt-5.2-codex` via the normal implement→verify flow.
+
+Parser mismatch warning:
+- `extract_plan.py` does not match TRACK/SPEC/multi-task PLAN formats today. Do not invoke Tier 1/Tier 2 for those blocks until deterministic parsers exist for them.
 
 ---
 
