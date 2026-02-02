@@ -701,18 +701,85 @@ On NEEDS_HUMAN: set `phase: needs_human` (all modes)
 
 ### `reflect` (execute phase)
 
-1. Update documentation if needed
-2. Update baselines:
+1. **Part B — Living Docs Evaluation (P9.5; optional; non-fatal; runs BEFORE Part A)**
+   - IF living docs exist (`.deadf/docs/*.md` exists for the canonical 7 docs) THEN attempt the P9.5 reflect pass; otherwise skip Part B entirely.
+   - Inputs:
+     - Scratch buffer: `.deadf/docs/.scratch.yaml`
+     - Reflect template: `.pipe/p9.5/P9_5_REFLECT.md`
+     - Living docs (7): `TECH_STACK.md`, `PATTERNS.md`, `PITFALLS.md`, `RISKS.md`, `PRODUCT.md`, `WORKFLOW.md`, `GLOSSARY.md` (under `.deadf/docs/`)
+   - Smart loading rules (minimize tokens):
+     - Always load: `TECH_STACK.md`, `PATTERNS.md`, `PITFALLS.md`
+     - Load `WORKFLOW.md` if CI/deploy/scripts/config changed
+     - Load `PRODUCT.md` if user-facing behavior changed
+     - Load `RISKS.md` if security/breaking/migration/operational risk surfaced
+     - Load `GLOSSARY.md` if new domain terminology appeared
+     - If `task_current == task_total` (track end): load **all 7 docs** and perform a final reconciliation pass
+   - Dispatch: run one lightweight LLM call using the reflect template with an evidence bundle (task summary, diff stat, abbreviated hunks, verify excerpt, scratch buffer, and loaded docs).
+   - Parse: require exactly one `REFLECT` sentinel block matching the grammar in `.pipe/p9.5/P9_5_REFLECT.md` (no prose outside).
+   - REFLECT sentinel parsing (strict; deterministic):
+     - Opener regex: `^<<<REFLECT:V1:NONCE=([0-9A-F]{6})>>>$`
+     - Closer regex: `^<<<END_REFLECT:NONCE=([0-9A-F]{6})>>>$`
+     - Exactly one opener and one closer; opener must appear before closer.
+     - Nonce must match between opener/closer and must equal the cycle nonce.
+     - No blank lines inside the block; no tabs; no prose outside the block.
+     - Enforce required sections per `ACTION` exactly as specified in `.pipe/p9.5/P9_5_REFLECT.md`; unknown/extra keys are a parse failure.
+   - 4-action protocol (LLM output drives which branch applies):
+     - `ACTION=NOP`: no-op; proceed
+     - `ACTION=BUFFER`: append each `OBSERVATIONS` item to `.deadf/docs/.scratch.yaml`
+     - `ACTION=UPDATE`: orchestrator applies `EDITS` to docs; also flushes any `BUFFER_FLUSH` entries into docs
+     - `ACTION=FLUSH`: orchestrator flushes buffered observations into docs via `EDITS` (track-end buffer-only)
+   - Commit responsibility (locked):
+     - The LLM emits structured `EDITS` only.
+     - The orchestrator applies edits and performs the git commit deterministically.
+   - Budget enforcement (must happen BEFORE any docs commit):
+     - After applying edits in the working tree: validate per-doc budgets using char-count ÷ 4.
+     - If any doc exceeds its cap: compress (merge → prune stale → tighten prose → evict least-relevant) until within cap.
+     - Only when all docs are within cap: commit the docs changes.
+   - Failure behavior (non-fatal):
+     - If the LLM call fails, or parsing fails, or applying edits fails: log a warning and skip Part B entirely.
+     - Regardless of Part B success/failure: Part A still runs.
+
+2. **Part A — State Advance (existing; always runs)**
+3. Update baselines:
    ```yaml
-   last_good.commit: <current HEAD>
+   last_good.commit: <current HEAD>  # includes any Part B docs commit if it happened
    last_good.task_id: <current task.id>
    last_good.timestamp: <now>
    ```
-3. Advance to next task or track:
+4. Advance to next task or track:
    - If more tasks in track: `task.sub_step: generate`, increment `task_current`
    - If track complete: `track.status: complete`, move to `tracks_completed`, set `phase: select-track`
    - If all tracks done: `phase: complete`
-4. Reset: `task.retry_count: 0`, `loop.stuck_count: 0`, `task.replan_attempted: false`
+5. Reset: `task.retry_count: 0`, `loop.stuck_count: 0`, `task.replan_attempted: false`
+
+#### P9.5 budgets (enforced; per-doc caps)
+
+| Doc | Max Tokens | Max Chars (~) | Typical | Content Strategy |
+|-----|-----------|---------------|---------|------------------|
+| TECH_STACK.md | 800 | 3200 | 400-600 | Stack table + commands + deps list |
+| PATTERNS.md | 800 | 3200 | 400-700 | Bullet list by category (code, testing, naming) |
+| PITFALLS.md | 700 | 2800 | 200-500 | One-line gotchas, bullet list |
+| RISKS.md | 500 | 2000 | 100-300 | Severity-tagged bullet list |
+| PRODUCT.md | 700 | 2800 | 300-500 | Short paragraphs: what, features, recent changes |
+| WORKFLOW.md | 700 | 2800 | 200-400 | CI commands, deploy process, preferences |
+| GLOSSARY.md | 500 | 2000 | 100-300 | Term: definition pairs |
+| **TOTAL** | **4700** | **18800** | **1800-3200** | **300 token buffer below 5000** |
+
+**Enforcement:** approximate token count is computed deterministically as `wc -c /path/to/doc | awk '{print int($1/4)}'`.
+
+#### P9.5 scratch buffer (`.deadf/docs/.scratch.yaml`)
+
+```yaml
+observations:
+  - task: auth-01-02
+    doc: PATTERNS.md
+    entry: "Prefer named exports for CLI command modules"
+    timestamp: "2026-02-01T15:30:00Z"
+  - task: auth-01-02
+    doc: PITFALLS.md
+    entry: "jest.mock must precede import in ESM"
+    timestamp: "2026-02-01T15:30:00Z"
+```
 
 ### `retry_task` (execute phase)
 
