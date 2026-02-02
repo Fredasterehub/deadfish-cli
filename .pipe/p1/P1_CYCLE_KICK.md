@@ -10,6 +10,7 @@
 | {MODE} | string | unknown | From STATE.yaml .mode |
 | {STATE_HINT} | string | unknown | Extracted under process lock |
 | {DISCORD_CHANNEL} | string | unknown | From POLICY.yaml .heartbeat.discord_channel (optional) |
+| {TASK_LIST_ID} | string | empty | From env `CLAUDE_CODE_TASK_LIST_ID` (may be blank; if blank, orchestrator must run with Task features disabled). |
 
 ## Kick Message
 
@@ -18,6 +19,7 @@ DEADF_CYCLE {CYCLE_ID}
 project: {PROJECT_NAME}
 path: {PROJECT_PATH}
 mode: {MODE}
+task_list_id: {TASK_LIST_ID}
 state: {STATE_HINT} (advisory -- STATE.yaml is authoritative; ignore hint if it conflicts)
 discord: {DISCORD_CHANNEL}
 

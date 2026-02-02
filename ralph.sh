@@ -418,6 +418,11 @@ while true; do
     fi
 
     # ── Rotate logs before kicking new cycle ─────────────────────────────
+    TASK_LIST_ID_FILE="$PROJECT_PATH/.deadf/task_list_id"
+    if [[ -f "$TASK_LIST_ID_FILE" ]]; then
+        export CLAUDE_CODE_TASK_LIST_ID="$(tr -d '\r\n' < "$TASK_LIST_ID_FILE")"
+    fi
+
     rotate_logs
 
     # ── Kick a new cycle ─────────────────────────────────────────────────

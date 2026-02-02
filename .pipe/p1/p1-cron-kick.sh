@@ -93,7 +93,7 @@ if [[ ! -w "$DEADF_DIR" || ! -w "$LOG_DIR" ]]; then
   exit 20
 fi
 
-for dep in flock yq date mktemp tee; do
+for dep in flock yq date mktemp tee stat; do
   if ! command -v "$dep" >/dev/null 2>&1; then
     log_json "ERROR" "error" 20 "missing_dependency:$dep" "$PROJECT_PATH" ""
     exit 20
@@ -104,6 +104,7 @@ if [[ ! -f "$STATE_FILE" || ! -f "$POLICY_FILE" ]]; then
   log_json "ERROR" "error" 20 "missing_state_or_policy" "$PROJECT_PATH" ""
   exit 20
 fi
+
 
 lock_file="$DEADF_DIR/cron.lock"
 exec 9>"$lock_file"
@@ -184,6 +185,55 @@ iteration_plus_one=$((iteration + 1))
 hex=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 CYCLE_ID="cycle-${iteration_plus_one}-${hex}"
 
+# ── Claude Task List ID (per-project persistent) ───────────────────────────
+TASK_LIST_ID_FILE="$DEADF_DIR/task_list_id"
+TASK_LIST_TRACK_FILE="$DEADF_DIR/task_list_track"
+TASK_LIST_MAX_AGE_S=${P1_TASK_LIST_MAX_AGE_S:-604800}
+
+is_valid_task_list_id() {
+  local v="$1"
+  [[ -n "$v" && "${#v}" -le 80 && "$v" =~ ^[A-Za-z0-9_.-]+$ ]]
+}
+
+# ── Rotation check ──
+if [[ -f "$TASK_LIST_ID_FILE" ]]; then
+  file_age=$(( $(date -u +%s) - $(stat -c %Y "$TASK_LIST_ID_FILE" 2>/dev/null || echo 0) ))
+  current_track=$(yq_read '.track.id // ""' "$STATE_FILE")
+  prev_track=""
+  [[ -f "$TASK_LIST_TRACK_FILE" ]] && prev_track=$(cat "$TASK_LIST_TRACK_FILE")
+
+  if (( file_age >= TASK_LIST_MAX_AGE_S )) || \
+     { [[ -n "$current_track" && "$current_track" != "null" && -n "$prev_track" && "$current_track" != "$prev_track" ]]; }; then
+    mv -f "$TASK_LIST_ID_FILE" "${TASK_LIST_ID_FILE}.prev" 2>/dev/null || true
+    log_json "INFO" "task_list_rotated" 0 "age=${file_age}s track=${current_track}" "$PROJECT_PATH" "$CYCLE_ID"
+  fi
+
+  [[ -n "$current_track" && "$current_track" != "null" ]] && printf '%s' "$current_track" > "$TASK_LIST_TRACK_FILE"
+fi
+
+# ── Read or generate ──
+if [[ -z "${CLAUDE_CODE_TASK_LIST_ID:-}" ]]; then
+  if [[ -f "$TASK_LIST_ID_FILE" ]]; then
+    task_list_id="$(tr -d '\r\n' < "$TASK_LIST_ID_FILE")"
+    if is_valid_task_list_id "$task_list_id"; then
+      export CLAUDE_CODE_TASK_LIST_ID="$task_list_id"
+    else
+      rm -f "$TASK_LIST_ID_FILE" || true
+    fi
+  fi
+
+  if [[ -z "${CLAUDE_CODE_TASK_LIST_ID:-}" ]]; then
+    hex32=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+    project_slug=$(printf '%s' "$PROJECT_NAME" | tr -cs 'A-Za-z0-9' '-' | tr '[:upper:]' '[:lower:]' | sed 's/^-//;s/-$//')
+    new_id="deadf-${project_slug}-${hex32}"
+    new_id="${new_id:0:80}"
+    tmp=$(mktemp "${TASK_LIST_ID_FILE}.tmp.XXXXXX")
+    printf '%s' "$new_id" > "$tmp"
+    mv -f "$tmp" "$TASK_LIST_ID_FILE"
+    export CLAUDE_CODE_TASK_LIST_ID="$new_id"
+    log_json "INFO" "task_list_created" 0 "$new_id" "$PROJECT_PATH" "$CYCLE_ID"
+  fi
+fi
 if [[ ! -f "$TEMPLATE_FILE" ]]; then
   log_json "ERROR" "error" 20 "template_missing" "$PROJECT_PATH" "$CYCLE_ID"
   exit 20
@@ -202,6 +252,7 @@ kick_message=${kick_message//\{CYCLE_ID\}/$CYCLE_ID}
 kick_message=${kick_message//\{MODE\}/$MODE}
 kick_message=${kick_message//\{STATE_HINT\}/$STATE_HINT}
 kick_message=${kick_message//\{DISCORD_CHANNEL\}/$DISCORD_CHANNEL}
+kick_message=${kick_message//\{TASK_LIST_ID\}/${CLAUDE_CODE_TASK_LIST_ID:-}}
 
 P1_MAX_LOGS=${P1_MAX_LOGS:-50}
 if [[ "$P1_MAX_LOGS" =~ ^[0-9]+$ ]]; then

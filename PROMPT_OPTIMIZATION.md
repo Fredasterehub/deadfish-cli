@@ -5,6 +5,8 @@
 
 ## Status: ✅ COMPLETE — All 13 prompts (P1-P12 + P9.5) optimized
 
+Note pipeline: Intégration Task Management (Claude Code Tasks) en cours — plomberie d'orchestration (pas un nouveau prompt P1–P12). Spécification: `.pipe/task-integration/synthesis-opus-orchestrator.md` (Synthesis v2).
+
 ## Méthodologie
 1. Inventorier tous les prompts (P1-P11) ✅
 2. Rechercher Ralph Wiggum (original + forks) ✅

@@ -38,6 +38,9 @@ coverage.xml
 # === deadf(ish) Pipeline Runtime State ===
 # The .deadf/ directory holds runtime state (locks, logs) — never commit
 .deadf/
+.deadf/task_list_id
+.deadf/task_list_id.prev
+.deadf/task_list_track
 
 # === Project Execution State (template outputs) ===
 # These are generated per-project when used as a template

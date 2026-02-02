@@ -94,6 +94,8 @@ task.files_to_load  — files listed in STATE task.files_to_load (cap: <3000 tok
 
 **OPS.md is NOT:** a diary, status tracker, or progress log. Status belongs in STATE.yaml. Progress belongs in git history. Keep OPS.md lean — every line is loaded every cycle.
 
+If the Task gate is open (`CLAUDE_CODE_TASK_LIST_ID` set and non-empty), run the recovery/backfill algorithm (TaskList snapshot, stale reset, backfill) before leaving LOAD.
+
 ### Step 2: VALIDATE
 
 1. Parse STATE.yaml. If unparseable or schema mismatch → `phase: needs_human`, reply `CYCLE_FAIL`.
@@ -113,6 +115,8 @@ task.files_to_load  — files listed in STATE task.files_to_load (cap: <3000 tok
    - Time: if `now() - budget.started_at >= POLICY.escalation.max_hours` → `phase: needs_human`, reply `CYCLE_FAIL`
    - Iterations: checked by ralph.sh (not your concern)
    - Budget 75% warning: if `now() - budget.started_at >= 0.75 * POLICY.escalation.max_hours` → notify Fred per POLICY
+
+If the Task gate is open, ensure the active Task exists and is marked `in_progress`.
 
 ### Step 3: DECIDE
 
@@ -140,9 +144,13 @@ Read `phase` and `task.sub_step` from STATE.yaml. The action is deterministic.
 
 **One cycle = one action. No chaining.**
 
+DECIDE performs **no** Task operations.
+
 ### Step 4: EXECUTE
 
 Run the determined action. See [Action Specifications](#action-specifications) below.
+
+If the Task gate is open, ensure required task chains exist (dedup by exact title) and create AC tasks where applicable.
 
 ### Step 5: RECORD
 
@@ -153,6 +161,8 @@ Update STATE.yaml atomically **under the shared `STATE.yaml.flock` lock** (read 
 - `last_action`: the action name
 - `last_result`: outcome details
 - Action-specific fields (see each action spec)
+
+If the Task gate is open, update Task status for the active task and any dependent tasks per the Task rules.
 
 **Baseline update rules:**
 - `last_good.commit`, `last_good.task_id`, `last_good.timestamp` → update ONLY after verify PASS + reflect complete
@@ -170,6 +180,8 @@ Print to stdout exactly one of (must be the **LAST LINE** of output):
 - `DONE` — project complete (`phase: complete`)
 
 Ralph does **not** parse stdout tokens; it polls `STATE.yaml` (`cycle.status`/`phase`) to determine progress. The reply token is for operator logs and compatibility and should still be the final line.
+
+If using Tasks, an optional Task summary line may precede the final token, but the final line must remain the token.
 
 ---
 
@@ -678,87 +690,131 @@ phase: needs_human
 
 Claude Code's native Task Management System (TaskCreate/TaskGet/TaskUpdate/TaskList) provides persistent workflow tracking with dependency graphs. Tasks complement STATE.yaml — they track the *how* while STATE.yaml tracks the *what*.
 
-### 1. Task-Enhanced Cycle Protocol
+### 1. Mechanical Gate + Non-Fatal Degradation
 
-Each cycle step maps to Task operations:
+**Gate (mechanical, deterministic):** Only perform any Task operations if `CLAUDE_CODE_TASK_LIST_ID` is set and non-empty (and should pass the same validation as the launcher: non-empty, `[A-Za-z0-9_.-]+`, ≤80 chars). If unset or invalid: skip **all** Task operations for the entire session. Never use a default/global task list.
 
-| Cycle Step | Task Operation |
-|------------|---------------|
-| **LOAD** | `TaskList` to check current state; `TaskGet` for active task details |
-| **VALIDATE** | `TaskUpdate` active task to `in_progress` |
-| **DECIDE** | DECIDE is driven by phase + task.sub_step from STATE.yaml; Tasks only mirror/log progress and never determine the action |
-| **EXECUTE** | `TaskCreate` for sub-tasks if spawning sub-agents; sub-agents `TaskUpdate` when done |
-| **RECORD** | `TaskUpdate` with completion status (`completed`) |
-| **REPLY** | `TaskList` for final state summary |
+**Non-fatal rule:** Every Task tool call is try/catch. If any Task operation fails or the tool is unavailable: log a warning and continue with STATE.yaml-only behavior. Zero regression from pre-integration behavior.
 
-### 2. Dependency Chain
+### 2. Task Naming Convention (Canonical)
 
-The execute sub-steps form a dependency graph:
-
+**Format:**
 ```
-generate_task (no deps)
-  → implement_task (blocked by generate)
-    → verify_task (blocked by implement)
-      → reflect (blocked by verify)
+deadf/{project_slug}/{track_id}/{task_id}/gen{N}/{action}
 ```
 
-Use `TaskCreate` with `addBlockedBy` to express this chain:
+**Segment encoding rules (sanitize):**
+`sanitize(value)` → lowercase, replace `[^a-z0-9-]` with `-`, collapse consecutive `-`, trim leading/trailing `-`, max 40 chars, if result is empty → `_`.
+
+**Segment sources:**
+- `{project_slug}` = sanitize(PROJECT_NAME)
+- `{track_id}` = sanitize(STATE.track.id) or `_` if absent
+- `{task_id}` = sanitize(STATE.task.id) or `_` if absent
+- `gen{N}` = `gen` + integer from `STATE.task.replan_generation` (default 0)
+- `{action}` = one of the fixed action names below (no sanitization)
+
+**Fixed action names:** `pick_track`, `create_spec`, `create_plan`, `generate_task`, `implement_task`, `verify_task`, `reflect`, `qa_review`, `ac-{AC_id}`, `needs_human`
+
+**AC suffix rule:** AC criteria tasks use `ac-{AC_id}` (e.g., `ac-AC2`).
+
+**Dedup rule (exact title):** Before any `TaskCreate`, search `TaskList()` for a task whose title exactly matches the target title. If found, reuse the existing task ID. (Prevents duplicate tasks on compaction re-runs.)
+
+**ID constraints:** STATE.yaml `track.id` and `task.id` SHOULD use `[a-z0-9-]` only to reduce collisions. Sanitization is deterministic, but lossy.
+
+### 3. STATE.yaml Task Fields
+
+Add and maintain:
+```yaml
+task:
+  replan_generation: 0  # integer, incremented on replan_task
+```
+
+Semantics: `replan_generation` is monotonically increasing per task_id. It is used in task titles as `gen{N}` to namespace task chains across replans.
+
+### 4. Cycle Protocol — Task Operations
+
+**LOAD:** Run the mechanical recovery algorithm (§6 below). Store a TaskList snapshot for use in VALIDATE/EXECUTE.
+
+**VALIDATE:** Ensure the active task exists and mark it `in_progress`:
+- Derive `active_title` from STATE.yaml (same as recovery step 1)
+- If found: `TaskUpdate(status: in_progress)`
+- If missing: `TaskCreate(active_title, status: in_progress)`
+
+**DECIDE:** No Task operations. DECIDE reads STATE.yaml only.
+
+**EXECUTE:** Ensure the chain exists (dedup by exact title) and create sub-agent tasks. Execute phase chain: `generate_task` → `implement_task` → `verify_task` → `reflect` → `qa_review` (conditional on POLICY). Select-track chain: `pick_track` → `create_spec` → `create_plan`. AC tasks: one per LLM criterion at verify time, with `addBlockedBy: [implement_task]` (NOT `verify_task`).
+
+**RECORD:**
+- On success: `TaskUpdate(active, status: completed)`
+- On failure with retry: `TaskUpdate(active, status: pending, notes: "attempt {retry_count}: {failure_reason}")`
+- On escalation (`needs_human`): leave failing task `pending`, ensure `needs_human` task exists and set `in_progress` with reason.
+
+**REPLY:** Optional task summary line before the final token. Final line remains `CYCLE_OK | CYCLE_FAIL | DONE`.
+
+### 5. Dependency Model + AC Tasks
+
+- AC sub-tasks are blocked by `implement_task`, **not** `verify_task`.
+- `verify_task` completion is orchestrator-gated **after** all AC results are collected and aggregated.
+- On verify FAIL: set `verify_task` back to `pending` and set `implement_task` back to `pending` for the same gen. Do NOT mark `verify_task` completed on FAIL.
+
+### 6. Recovery / Backfill Algorithm (Mechanical, Binding)
 
 ```
-TaskCreate("generate_task", status: "pending")                          → task_id: A
-TaskCreate("implement_task", status: "pending", addBlockedBy: [A])      → task_id: B
-TaskCreate("verify_task", status: "pending", addBlockedBy: [B])         → task_id: C
-TaskCreate("reflect", status: "pending", addBlockedBy: [C])             → task_id: D
+INPUT: STATE.yaml (authoritative), TaskList() snapshot
+
+STEP 1: Derive expected_active_title
+  project_slug = sanitize(PROJECT_NAME)
+  track_id = sanitize(STATE.track.id) or "_"
+  task_id = sanitize(STATE.task.id) or "_"
+  gen = "gen" + str(STATE.task.replan_generation or 0)
+  action = map_sub_step_to_action(STATE.task.sub_step)  # see table below
+  expected_active_title = f"deadf/{project_slug}/{track_id}/{task_id}/{gen}/{action}"
+
+STEP 2: Find active task
+  active_task = first task in TaskList where title == expected_active_title
+  If multiple matches: prefer status in_progress > pending > completed; then first.
+
+STEP 3: Reset stale in_progress tasks
+  For EACH task in TaskList where:
+    - task.status == "in_progress"
+    - task.title != expected_active_title
+  Do:
+    TaskUpdate(task.id, status: "pending",
+      notes: "Stale: reset at LOAD by orchestrator")
+
+STEP 4: Backfill completed steps from STATE
+  implied_complete = steps_before(STATE.task.sub_step)
+  # e.g. if sub_step=verify → implied_complete = [generate_task, implement_task]
+  For EACH step in implied_complete:
+    title = derive_title(step)  # same format as step 1
+    task = find_by_title(title)
+    If task exists AND task.status != "completed":
+      TaskUpdate(task.id, status: "completed", notes: "Backfilled from STATE")
+
+STEP 5: Proceed with VALIDATE (which marks active task in_progress)
 ```
 
-When a step completes (`TaskUpdate(status: "completed")`), the next becomes unblocked automatically.
+**sub_step → action mapping (keyed by STATE.task.sub_step):**
 
-### 3. Session Persistence
+| STATE.task.sub_step | action (for title) |
+|---------------------|---------------------|
+| null / generate | generate_task |
+| implement | implement_task |
+| verify | verify_task |
+| reflect | reflect |
+| qa_review | qa_review |
 
-- `ralph.sh` sets `CLAUDE_CODE_TASK_LIST_ID` before invoking `claude`
-- Tasks persist in `~/.claude/tasks/` as JSON across sessions and context compaction
-- On resume: `TaskList` to see where we left off — Tasks help resume quickly, but STATE.yaml remains authoritative for task.sub_step.
+**steps_before mapping (keyed by STATE.task.sub_step, returns action names):**
 
-### 4. Multi-Session Coordination
+| STATE.task.sub_step | Implied complete actions |
+|---------------------|--------------------------|
+| null / generate | [] |
+| implement | [generate_task] |
+| verify | [generate_task, implement_task] |
+| reflect | [generate_task, implement_task, verify_task] |
+| qa_review | [generate_task, implement_task, verify_task, reflect] |
 
-- Multiple Claude sessions can share the same task list via `CLAUDE_CODE_TASK_LIST_ID`
-- Sub-agents spawned via the Task tool can claim and update tasks from the shared list
-- Use `TaskUpdate(status: 'in_progress')` to signal work is active (shows spinner in terminal)
-
-### 5. Sub-Agent MCP Restriction
-
-**IMPORTANT:** Sub-agents spawned via the Task tool CANNOT access project-scoped MCP servers (`.mcp.json`).
-
-| Agent | MCP Access | Model Dispatch Method |
-|-------|-----------|----------------------|
-| **Main orchestrator** | ✅ CAN use Codex MCP | `codex` / `codex-reply` MCP tools |
-| **Sub-agents** | ❌ NO MCP access | `codex exec` (shell command) only |
-
-This is a known Claude Code limitation. Design sub-agent prompts to use `codex exec` for GPT-5.2/gpt-5.2-codex dispatch, never Codex MCP tools.
-
-### 6. Hybrid State Model
-
-Tasks and STATE.yaml coexist with clear separation of concerns:
-
-| System | Tracks | Example |
-|--------|--------|---------|
-| **STATE.yaml** | Pipeline config — the *what* | phase, mode, budget, baselines, policy |
-| **Tasks** | Workflow progress — the *how* | which sub-step, dependencies, completion status |
-| **Sentinel DSL** | LLM↔script communication — the *language* | nonce-tagged plan/verdict blocks |
-
-**Never duplicate data between Tasks and STATE.yaml.** Tasks track progress, STATE.yaml tracks configuration. If you need to know *where* in the pipeline: STATE.yaml. If you need to know *what's been done this cycle*: Tasks.
-
-### 7. Task Naming Convention
-
-Tasks follow the pattern: `deadf-{run_id}-{task_id}-{sub_step}`
-
-Examples:
-- `deadf-run001-auth01-generate`
-- `deadf-run001-auth01-implement`
-- `deadf-run001-auth01-verify`
-- `deadf-run001-auth01-reflect`
-
----
+**Invariant:** STATE.yaml always wins. If Tasks disagree with STATE, log a mismatch warning but do not advance STATE based on Tasks.
 
 ## Sentinel Parsing
 
@@ -1098,13 +1154,15 @@ Never write to STATE.yaml without holding this lock. Never partial writes.
 ```
 DEADF_CYCLE <cycle_id>
   │
-  ├─ LOAD:     Read STATE.yaml + POLICY.yaml + task files
-  ├─ VALIDATE: Parse state, derive nonce, set cycle.status=running, check budgets
-  ├─ DECIDE:   phase + task.sub_step → exactly one action
-  ├─ EXECUTE:  Run the action (dispatch to appropriate worker)
-  ├─ RECORD:   Update STATE.yaml (always increment iteration)
+  ├─ LOAD:     Read STATE.yaml + POLICY.yaml + task files | Task recovery/backfill (if gated)
+  ├─ VALIDATE: Parse state, derive nonce, set cycle.status=running, check budgets | Ensure active Task in_progress
+  ├─ DECIDE:   phase + task.sub_step → exactly one action (no Task ops)
+  ├─ EXECUTE:  Run the action (dispatch to appropriate worker) | Task chain + AC tasks as needed
+  ├─ RECORD:   Update STATE.yaml (always increment iteration) | Task completion/rollback updates
   └─ REPLY:    CYCLE_OK | CYCLE_FAIL | DONE  (printed to stdout, last line)
 ```
+
+Task list ID: `.pipe/p1/p1-cron-kick.sh` manages `.deadf/task_list_id` (create + rotate). `ralph.sh` only passes through if the file exists; if unset, Tasks are disabled (non-fatal).
 
 ### Task Management Commands
 
@@ -1114,7 +1172,7 @@ DEADF_CYCLE <cycle_id>
 | Get task details | `TaskGet` with task ID |
 | Create task | `TaskCreate` with description and dependencies (`addBlockedBy`/`addBlocks`) |
 | Update task | `TaskUpdate` with status: `pending` / `in_progress` / `completed` |
-| Task list ID | Set `CLAUDE_CODE_TASK_LIST_ID` env var (ralph.sh does this automatically) |
+| Task list ID | Managed by `.pipe/p1/p1-cron-kick.sh` via `.deadf/task_list_id`. `ralph.sh` passes through if file exists; if unset, skip all Task operations (non-fatal). |
 
 ---
 
@@ -1128,6 +1186,15 @@ Preferred launcher: `.pipe/p1/p1-cron-kick.sh`. Ralph/cron should call the launc
 Dual-lock model:
 - Process lock: `.deadf/cron.lock` held by the launcher for the full orchestrator runtime.
 - State lock: `STATE.yaml.flock` held by the orchestrator for atomic R-M-W (VALIDATE + RECORD).
+
+Task list lifecycle (binding):
+- Owner: `.pipe/p1/p1-cron-kick.sh` creates/rotates `.deadf/task_list_id`. `ralph.sh` only passes through if the file exists; otherwise Tasks are disabled (non-fatal).
+- Operator override: if `CLAUDE_CODE_TASK_LIST_ID` is already set in the environment, the launcher must honor it (no overwrite).
+- File: `.deadf/task_list_id` is a single line, bare string, **no trailing newline**. Format `deadf-{project_slug}-{32hex}`, max 80 chars. Validation: non-empty, `[A-Za-z0-9_.-]+`, ≤80 chars; invalid → warn + regenerate.
+- Tracking file: `.deadf/task_list_track` stores last `track.id` for rotation detection.
+- Rotation triggers: track change OR file age > 7 days. Max age via `P1_TASK_LIST_MAX_AGE_S` (default `604800`).
+- Rotation procedure: `mv .deadf/task_list_id .deadf/task_list_id.prev`, then regenerate on next read (file absent → create new ID). Always update `.deadf/task_list_track` with current `track.id`.
+- Reset procedures (operator-facing). Soft reset: `rm -f .deadf/task_list_id .deadf/task_list_track`. Hard reset: `rm -f .deadf/task_list_id .deadf/task_list_id.prev .deadf/task_list_track`.
 
 Early-exit / output contract:
 - If the orchestrator is invoked, it MUST end with exactly one of: `CYCLE_OK | CYCLE_FAIL | DONE` as the last line.
