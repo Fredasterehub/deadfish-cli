@@ -149,6 +149,12 @@
 - **Concept:** Per-criterion sub-agent verification with three-level check (Exists → Substantive → Wired from GSD). One sub-agent per LLM: criterion, parallel fan-out (up to 7). Evidence bundles (~4K tokens): verify.sh JSON + git stat + relevant diff hunks + task context. Block-only sentinel VERDICT output. Conservative default (uncertain → NO). Pre-parse regex + one format-repair retry. DET: criteria auto-skip. Untagged → LLM: with warning.
 - **Status:** ✅ Implemented (commit `d8b073c`, dual-brain synthesis + 3 review rounds)
 
+### P9.5 — Reflect (Claude Code → GPT-5.2)
+- **Quand:** Phase `execute`, sub_step `reflect`, after verify PASS
+- **Modèle:** GPT-5.2 via Codex MCP (or Claude Code directly)
+- **Concept:** Conductor-inspired living docs update. After each completed task: extract lessons learned, update PATTERNS.md/PITFALLS.md/TECH_STACK.md with new conventions/gotchas/deps discovered during implementation. Re-evaluate project understanding based on what was just built. Feed enriched context back into next cycle. Dynamic vs static — docs evolve with the codebase.
+- **Status:** 🔲 Next up
+
 ### P10 — Format-Repair Retry
 - **Quand:** Quand extract_plan.py ou build_verdict.py fail
 - **Modèle:** Même que le prompt original
