@@ -153,7 +153,7 @@
 - **Quand:** Phase `execute`, sub_step `reflect`, after verify PASS
 - **Modèle:** GPT-5.2 via Codex MCP (or Claude Code directly)
 - **Concept:** Conductor-inspired living docs update. After each completed task: extract lessons learned, update PATTERNS.md/PITFALLS.md/TECH_STACK.md with new conventions/gotchas/deps discovered during implementation. Re-evaluate project understanding based on what was just built. Feed enriched context back into next cycle. Dynamic vs static — docs evolve with the codebase.
-- **Status:** 🔲 Next up
+- **Status:** ✅ Implemented (commit `233dbf5`, dual-brain synthesis + 2 review rounds)
 
 ### P10 — Format-Repair Retry
 - **Quand:** Quand extract_plan.py ou build_verdict.py fail
