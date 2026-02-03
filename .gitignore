@@ -1,6 +1,32 @@
+# Pipeline working artifacts (not committed)
 .pipe/*/plan-*.md
 .pipe/*/synthesis-*.md
 .pipe/*-codex-prompt.md
 .pipe/reviews/
 .pipe/restructure/
+.pipe/p*/
+.pipe/p*-codex-prompt*.md
+.pipe/codebase-analysis-*.md
+.pipe/OPTIMIZATION_TRACKER.md
+.pipe/p2-p5-restructure-*.md
+.pipe/p6-analysis-*.md
+.pipe/p6-codex-prompts.md
+.pipe/p6-gpt52-consultation.md
+.pipe/t*-codex-prompts.md
+.pipe/restructure-state.yaml
+.pipe/task-integration/
+
+# deadf runtime state (not committed — only bin/, contracts/, templates/ are source)
+.deadf/state/
+.deadf/tracks/
 .deadf/cycle.flock
+.deadf/runtime/
+.deadf/logs/
+.deadf/p12/
+
+# Test working files
+tests/fixtures/task-packets/
+
+# Python
+__pycache__/
+*.pyc
