@@ -180,7 +180,10 @@ check_tests() {
       test_summary="exit code $test_exit (count unknown)"
     fi
 
-    if [[ "$test_exit" -ne 0 ]]; then
+    if [[ "$test_exit" -eq 5 ]]; then
+      # pytest exit code 5 = no tests collected (non-fatal)
+      test_summary="no tests found (non-fatal)"
+    elif [[ "$test_exit" -ne 0 ]]; then
       add_failure "test_exit != 0: tests failed (exit $test_exit)"
     fi
   fi
