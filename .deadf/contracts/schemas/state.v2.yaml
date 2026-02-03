@@ -1,0 +1,68 @@
+# Schema for .deadf/state/STATE.yaml (v2)
+# This is a human-readable contract, not JSON Schema.
+# Conventions:
+# - Timestamps are ISO-8601 strings (UTC recommended, e.g. 2026-02-03T04:11:40Z).
+# - "required" indicates expected presence for a healthy running state.
+# - "optional" indicates the field may be missing or null.
+
+_run_id: "run-YYYY-MM-DD-<slug>"  # string, required, unique run identifier
+
+budget:  # required
+  max_hours: 48                     # int >= 0, required
+  started_at: "2026-02-02T20:35:00Z"  # string timestamp, required
+
+cycle:  # required
+  id: "cycle-<iteration>-<nonce>"  # string, required
+  status: "idle"                   # string, required (e.g. idle|running|timed_out|failed|done)
+  nonce: "2C1C9A"                  # string, required (short hex)
+  session_key: "agent:..."         # string, optional (orchestrator session key)
+  started_at: "2026-02-03T04:18:28Z"    # string timestamp, required
+  finished_at: "2026-02-03T04:11:40Z"   # string timestamp, optional
+  last_heartbeat_at: "2026-02-03T04:18:28Z"  # string timestamp, optional
+
+last_action: "reflect"             # string, required (last action executed)
+
+last_cycle:  # optional
+  commit_hash: "<git sha>"         # string, optional
+  diff_lines: 1118                  # int >= 0, optional
+  test_count: 0                     # int >= 0, optional
+
+last_good:  # optional
+  commit: "<git sha>"              # string, optional
+  task_id: "phase-2"               # string, optional
+  timestamp: "2026-02-03T04:11:40Z"  # string timestamp, optional
+
+last_result:  # optional
+  ok: true                          # bool, optional
+  details: "..."                   # string, optional
+
+loop:  # required
+  iteration: 20                     # int >= 0, required
+  stuck_count: 0                    # int >= 0, required
+
+mode: "yolo"                       # string, required (policy mode key)
+phase: "needs_human"               # string, required (pipeline phase)
+project: "deadfish-cli"            # string, required (project slug/name)
+
+task:  # required
+  id: "phase-2"                    # string, required
+  description: "..."               # string, required
+  sub_step: "generate"              # string, required (e.g. generate|implement|verify|reflect)
+  max_retries: 3                    # int >= 0, required
+  retry_count: 0                    # int >= 0, required
+  replan_attempted: false           # bool, required
+  files_to_load:                    # list<string>, optional
+    - ".deadf/bin/kick.sh"
+    - ".deadf/state/STATE.yaml"
+
+track:  # required
+  id: "restructure"                # string, required
+  name: "Pipeline restructure v2 (phases 1b-7)"  # string, required
+  status: "in-progress"            # string, required (e.g. planned|in-progress|complete)
+  task_current: 2                   # int >= 0, required
+  tasks_total: 6                    # int >= 0, required
+  tracks_completed:                 # list<object>, optional
+    - id: "phase-1a"               # string, required
+      name: "Unified sentinel parser"  # string, required
+      commit: "6deb9e2"            # string, optional (short sha ok)
+  tracks_remaining: []              # list<object>, optional (same shape as tracks_completed)

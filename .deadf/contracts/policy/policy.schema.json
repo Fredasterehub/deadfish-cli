@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "deadf://contracts/policy/policy.schema.json",
+  "title": "deadf POLICY.yaml",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["modes", "escalation", "heartbeat", "rollback", "verification"],
+  "properties": {
+    "modes": {
+      "type": "object",
+      "description": "Policy modes keyed by name (e.g. yolo).",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[A-Za-z0-9_-]+$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["description", "notifications", "approvals"],
+          "properties": {
+            "description": { "type": "string" },
+            "notifications": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "track_complete",
+                "task_complete",
+                "stuck",
+                "triple_fail_rollback",
+                "budget_75_percent",
+                "complete"
+              ],
+              "properties": {
+                "track_complete": { "type": "string" },
+                "task_complete": { "type": "string" },
+                "stuck": { "type": "string" },
+                "triple_fail_rollback": { "type": "string" },
+                "budget_75_percent": { "type": "string" },
+                "complete": { "type": "string" }
+              }
+            },
+            "approvals": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["new_track", "task_start"],
+              "properties": {
+                "new_track": { "type": "boolean" },
+                "task_start": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stuck_threshold", "max_retries", "max_iterations", "max_hours"],
+      "properties": {
+        "stuck_threshold": { "type": "integer", "minimum": 0 },
+        "max_retries": { "type": "integer", "minimum": 0 },
+        "max_iterations": { "type": "integer", "minimum": 0 },
+        "max_hours": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "heartbeat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "cycle_interval_min",
+        "stale_timeout_min",
+        "lease_renewal",
+        "discord_channel",
+        "status_format"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "cycle_interval_min": { "type": "integer", "minimum": 1 },
+        "stale_timeout_min": { "type": "integer", "minimum": 1 },
+        "lease_renewal": { "type": "boolean" },
+        "discord_channel": { "type": "string" },
+        "status_format": { "type": "string" }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "trigger"],
+      "properties": {
+        "authority": { "type": "string" },
+        "trigger": { "type": "string" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format_repair_retries"],
+      "properties": {
+        "format_repair_retries": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

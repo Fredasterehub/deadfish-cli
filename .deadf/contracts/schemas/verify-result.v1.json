@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "deadf://contracts/schemas/verify-result.v1.json",
+  "title": "deadf verify.sh result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pass", "checks", "failures", "timestamp"],
+  "properties": {
+    "pass": { "type": "boolean" },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "test_exit",
+        "test_count",
+        "test_summary",
+        "lint_exit",
+        "diff_lines",
+        "diff_ok",
+        "paths_ok",
+        "blocked_files",
+        "secrets_found",
+        "secret_matches",
+        "git_clean",
+        "uncommitted_files"
+      ],
+      "properties": {
+        "test_exit": { "type": "integer" },
+        "test_count": { "type": "integer", "minimum": 0 },
+        "test_summary": { "type": "string" },
+        "lint_exit": { "type": "integer" },
+        "diff_lines": { "type": "integer", "minimum": 0 },
+        "diff_ok": { "type": "boolean" },
+        "paths_ok": { "type": "boolean" },
+        "blocked_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "secrets_found": { "type": "boolean" },
+        "secret_matches": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "git_clean": { "type": "boolean" },
+        "uncommitted_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

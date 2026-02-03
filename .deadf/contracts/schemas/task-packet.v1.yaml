@@ -1,0 +1,41 @@
+# Schema for task packet YAML frontmatter (v1)
+# This is a human-readable contract, not JSON Schema.
+# Frontmatter is bounded by leading and trailing '---' lines.
+
+# Required fields
+# - task_id: string
+# - track_id: string
+# - task_number: integer (1-based index within the track)
+# - title: string
+# - status: string (suggested enum: spec|implement|verify|done|blocked)
+
+# Optional fields
+# - source_plan: string (path or reference to plan section)
+# - source_architecture: string (path or reference to architecture section)
+# - owner: string (e.g., implementation|verification)
+# - estimated_diff_lines: integer
+# - files: list of file directives
+# - acceptance_criteria: list of acceptance criteria
+
+# Field shapes
+
+task_id: "phase-2"                 # string, required
+track_id: "restructure"            # string, required
+task_number: 2                      # int, required
+
+title: "Launcher unification (kick.sh)"  # string, required
+source_plan: ".deadf/tracks/restructure/plan.md#phase-2"  # string, optional
+source_architecture: ".pipe/restructure/synthesis-v2-final.md#F3"  # string, optional
+
+status: "spec"                     # string, required
+owner: "implementation"            # string, optional
+estimated_diff_lines: 350           # int, optional
+
+files:                              # list<object>, optional
+  - path: .deadf/bin/kick.sh         # string, required
+    action: modify                  # string, required (create|modify|delete|none)
+    rationale: "..."                # string, required
+
+acceptance_criteria:                # list<object>, optional
+  - id: AC1                          # string, required
+    text: "DET: ..."                # string, required

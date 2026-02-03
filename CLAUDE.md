@@ -195,7 +195,7 @@ Deterministic rule:
 1. If `.deadf/seed/P2_DONE` is missing **OR** any of `VISION.md`, `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.yaml` are missing/empty:
    - set `phase: needs_human`
    - write a notification instructing the operator to run the P2 runner:
-     `.pipe/p12-init.sh --project "<project_root>"`
+     `.deadf/bin/init.sh --project "<project_root>"`
 2. If `P2_DONE` exists **and** all five files exist and are non-empty:
    - set `phase: select-track` (do not overwrite docs)
 
@@ -209,13 +209,13 @@ Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; trea
 - Living docs feed into P2 brainstorm as brownfield context
 - WORKFLOW.md contains smart loading map (track type → relevant docs subset)
 - P12 failure degrades gracefully to greenfield brainstorm
-- Entry point: `.pipe/p12-init.sh --project <path>`
+- Entry point: `.deadf/bin/init.sh --project <path>`
 - Marker: `.deadf/p12/P12_DONE`
 
 ### `pick_track` (select-track phase)
 
 1. Load `STATE.yaml`, `ROADMAP.md`, `REQUIREMENTS.md` (also `VISION.md` and `PROJECT.md` for context).
-2. Consult GPT-5.2 planner using `.pipe/p3/P3_PICK_TRACK.md`.
+2. Consult GPT-5.2 planner using `.deadf/templates/track/select-track.md`.
 3. Expect exactly one TRACK sentinel block:
    ```
    <<<TRACK:V1:NONCE={nonce}>>>
@@ -235,7 +235,7 @@ Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; trea
 
 1. Load `STATE.yaml`, `ROADMAP.md`, `REQUIREMENTS.md`, `PROJECT.md`, and `OPS.md` (if present).
 2. Search the codebase (`rg`, `find`) for related implementations before assuming anything is missing.
-3. Consult GPT-5.2 planner using `.pipe/p4/P4_CREATE_SPEC.md`.
+3. Consult GPT-5.2 planner using `.deadf/templates/track/write-spec.md`.
 4. Expect exactly one SPEC sentinel block:
    ```
    <<<SPEC:V1:NONCE={nonce}>>>
@@ -251,7 +251,7 @@ Note: P12 writes `.deadf/p12/P12_DONE` when mapping/confirmation completes; trea
 ### `create_plan` (select-track phase)
 
 1. Load `STATE.yaml`, the track `SPEC.md` at `track.spec_path`, `PROJECT.md`, and `OPS.md` (if present).
-2. Consult GPT-5.2 planner using `.pipe/p5/P5_CREATE_PLAN.md`.
+2. Consult GPT-5.2 planner using `.deadf/templates/track/write-plan.md`.
 3. Expect exactly one PLAN sentinel block:
    ```
    <<<PLAN:V1:NONCE={nonce}>>>
@@ -308,12 +308,12 @@ Behavior (JIT task compiler/binder; mechanical by default):
 - Drift detection requires BOTH:
   - `track.plan_base_commit` differs from `HEAD`, AND
   - evidence that plan file bindings are stale (missing `modify/delete` targets, moved files, integration point no longer present).
-- In this case, run a **small GPT call** using `.pipe/p6/P6_GENERATE_TASK.md` to adapt *only* bindings and context (do not re-plan).
+- In this case, run a **small GPT call** using `.deadf/templates/task/generate-packet.md` to adapt *only* bindings and context (do not re-plan).
 - Acceptance criteria are immutable.
 - Output is still the structured markdown task packet at `.deadf/tracks/{track.id}/tasks/TASK_{NNN}.md`.
 
 **Retry path (`task.retry_count > 0`):**
-- Use `.pipe/p6/P6_GENERATE_TASK.md` to package failure context and adapt execution guidance.
+- Use `.deadf/templates/task/generate-packet.md` to package failure context and adapt execution guidance.
 - Keep acceptance criteria **immutable**; append retry guidance after the original SUMMARY, never replace it.
 - Output is still the structured markdown task packet at `.deadf/tracks/{track.id}/tasks/TASK_{NNN}.md`.
 
@@ -369,7 +369,7 @@ Minimum required sections (example structure):
 Inputs:
 - `STATE.yaml` (for `task.retry_count`, `task.max_retries`, and traceability fields)
 - Task packet: `.deadf/tracks/{track.id}/tasks/TASK_{NNN}.md` where `NNN` is `track.task_current` (1-based) zero-padded to 3 digits
-- P7 prompt template: `.pipe/p7/P7_IMPLEMENT_TASK.md`
+- P7 prompt template: `.deadf/templates/task/implement.md`
 
 1. Assemble the implementation prompt from the P7 template:
    - Read the task packet file and inject it verbatim into the template as `{TASK_PACKET_CONTENT}`.
@@ -413,7 +413,7 @@ If `verify.sh.pass == false` → FAIL immediately. Do NOT run LLM verifier.
 **DET fast-path:** If `verify.sh.pass == true` and there are **no** LLM criteria after tagging (including untagged → LLM), skip P9 entirely and treat LLM verification as PASS.
 
 For each LLM acceptance criterion (tagged or untagged):
-1. Build a **per-criterion evidence bundle** using `.pipe/p9/P9_VERIFY_CRITERION.md` (target ~4K tokens per bundle):
+1. Build a **per-criterion evidence bundle** using `.deadf/templates/verify/verify-criterion.md` (target ~4K tokens per bundle):
    - Criterion id + verbatim text
    - Task id/title/summary + planned FILES list
    - verify.sh JSON excerpt: `pass`, `test_summary`, `lint_exit`, `diff_lines`, `secrets_found`, `git_clean`
@@ -467,7 +467,7 @@ On NEEDS_HUMAN: set `phase: needs_human` (all modes)
    - IF living docs exist (`.deadf/docs/*.md` exists for the canonical 7 docs) THEN attempt the P9.5 reflect pass; otherwise skip Part B entirely.
    - Inputs:
      - Scratch buffer: `.deadf/docs/.scratch.yaml`
-     - Reflect template: `.pipe/p9.5/P9_5_REFLECT.md`
+     - Reflect template: `.deadf/templates/verify/reflect.md`
      - Living docs (7): `TECH_STACK.md`, `PATTERNS.md`, `PITFALLS.md`, `RISKS.md`, `PRODUCT.md`, `WORKFLOW.md`, `GLOSSARY.md` (under `.deadf/docs/`)
    - Smart loading rules (minimize tokens):
      - Always load: `TECH_STACK.md`, `PATTERNS.md`, `PITFALLS.md`
@@ -477,14 +477,14 @@ On NEEDS_HUMAN: set `phase: needs_human` (all modes)
      - Load `GLOSSARY.md` if new domain terminology appeared
      - If `task_current == task_total` (track end): load **all 7 docs** and perform a final reconciliation pass
    - Dispatch: run one lightweight LLM call using the reflect template with an evidence bundle (task summary, diff stat, abbreviated hunks, verify excerpt, scratch buffer, and loaded docs).
-   - Parse: require exactly one `REFLECT` sentinel block matching the grammar in `.pipe/p9.5/P9_5_REFLECT.md` (no prose outside).
+   - Parse: require exactly one `REFLECT` sentinel block matching the grammar in `.deadf/templates/verify/reflect.md` (no prose outside).
    - REFLECT sentinel parsing (strict; deterministic):
      - Opener regex: `^<<<REFLECT:V1:NONCE=([0-9A-F]{6})>>>$`
      - Closer regex: `^<<<END_REFLECT:NONCE=([0-9A-F]{6})>>>$`
      - Exactly one opener and one closer; opener must appear before closer.
      - Nonce must match between opener/closer and must equal the cycle nonce.
      - No blank lines inside the block; no tabs; no prose outside the block.
-     - Enforce required sections per `ACTION` exactly as specified in `.pipe/p9.5/P9_5_REFLECT.md`; unknown/extra keys are a parse failure.
+     - Enforce required sections per `ACTION` exactly as specified in `.deadf/templates/verify/reflect.md`; unknown/extra keys are a parse failure.
    - 4-action protocol (LLM output drives which branch applies):
      - `ACTION=NOP`: no-op; proceed
      - `ACTION=BUFFER`: append each `OBSERVATIONS` item to `.deadf/docs/.scratch.yaml`
@@ -568,7 +568,7 @@ Inputs:
 - All `TASK_{NNN}.md` files for the track
 - Living docs under `.deadf/docs/` (if present)
 - Git history/diff from `track.plan_base_commit..HEAD`
-- Template: `.pipe/p11/P11_QA_REVIEW.md`
+- Template: `.deadf/templates/verify/qa-review.md`
 
 Evidence bundle (hard caps):
 - `combined_git_diff_stat`: `git diff {track.plan_base_commit}..HEAD --stat`
@@ -580,14 +580,14 @@ Evidence bundle (hard caps):
 - Total evidence budget: ≤15K tokens
 
 Execution:
-1. Dispatch to GPT-5.2 using `.pipe/p11/P11_QA_REVIEW.md`.
+1. Dispatch to GPT-5.2 using `.deadf/templates/verify/qa-review.md`.
 2. Parse exactly one `QA_REVIEW` sentinel block:
    a. Exactly one opener/closer with matching nonce
    b. `FINDINGS_COUNT` matches number of FINDINGS items
    c. `REMEDIATION_COUNT` matches number of REMEDIATION items
    d. Fixed field order; no extra keys; no blank lines; no tabs
 3. On parse failure:
-   - Tier 1: run `.pipe/p10/P10_FORMAT_REPAIR.md` one retry (same nonce)
+   - Tier 1: run `.deadf/templates/repair/format-repair.md` one retry (same nonce)
    - If Tier 1 still fails: follow the P10 3-tier escalation policy (Tier 2 auto-diagnose; then Tier 3 per-block policy)
 
 State transitions (explicit):
@@ -945,7 +945,7 @@ NOTES="Brief summary of track quality. ≤500 chars."
 
 QA_REVIEW block rules (parser-safe):
 - Fixed shape: FINDINGS and REMEDIATION sections are always present.
-- Field order is fixed (same as `.pipe/p11/P11_QA_REVIEW.md`).
+- Field order is fixed (same as `.deadf/templates/verify/qa-review.md`).
 - No blank lines inside block; no tabs; no prose outside.
 - `FINDINGS_COUNT` and `REMEDIATION_COUNT` must equal the actual number of items.
 - If `VERDICT=FAIL`: `FINDINGS_COUNT >= 1` and `REMEDIATION_COUNT >= 1`.
@@ -975,7 +975,7 @@ Tier 1 and Tier 2 are bounded to one attempt each. No loops.
 
 #### Tier 1 — Format Repair (Universal; One Retry Max)
 
-- Template: `.pipe/p10/P10_FORMAT_REPAIR.md`
+- Template: `.deadf/templates/repair/format-repair.md`
 - Inputs: verbatim parser/validator error + verbatim original output + injected per-block format contract
 - Constraints: same nonce (same cycle), same model, one retry maximum
 - Output: block-only corrected sentinel block (no prose, no code fences)
@@ -991,7 +991,7 @@ Truncation:
 
 Trigger: Tier 1 fails.
 
-- Template: `.pipe/p10/P10_AUTO_DIAGNOSE.md`
+- Template: `.deadf/templates/repair/auto-diagnose.md`
 - Actor: GPT-5.2-high via Codex MCP / `codex exec`
 - Inputs: both parser errors, both outputs, authoritative format contract, and parser excerpt (relevant regex/function only)
 - Output (exactly one):
@@ -1162,7 +1162,7 @@ DEADF_CYCLE <cycle_id>
   └─ REPLY:    CYCLE_OK | CYCLE_FAIL | DONE  (printed to stdout, last line)
 ```
 
-Task list ID: `.pipe/p1/p1-cron-kick.sh` manages `.deadf/task_list_id` (create + rotate). `ralph.sh` only passes through if the file exists; if unset, Tasks are disabled (non-fatal).
+Task list ID: `.deadf/bin/cron-kick.sh` manages `.deadf/task_list_id` (create + rotate). `ralph.sh` only passes through if the file exists; if unset, Tasks are disabled (non-fatal).
 
 ### Task Management Commands
 
@@ -1172,23 +1172,23 @@ Task list ID: `.pipe/p1/p1-cron-kick.sh` manages `.deadf/task_list_id` (create +
 | Get task details | `TaskGet` with task ID |
 | Create task | `TaskCreate` with description and dependencies (`addBlockedBy`/`addBlocks`) |
 | Update task | `TaskUpdate` with status: `pending` / `in_progress` / `completed` |
-| Task list ID | Managed by `.pipe/p1/p1-cron-kick.sh` via `.deadf/task_list_id`. `ralph.sh` passes through if file exists; if unset, skip all Task operations (non-fatal). |
+| Task list ID | Managed by `.deadf/bin/cron-kick.sh` via `.deadf/task_list_id`. `ralph.sh` passes through if file exists; if unset, skip all Task operations (non-fatal). |
 
 ---
 
 ## Cycle Kick / Launcher (CLI Adaptation)
 
-Canonical kick template: `.pipe/p1/P1_CYCLE_KICK.md`.
+Canonical kick template: `.deadf/templates/kick/cycle-kick.md`.
 Canonical trigger sentinel: `DEADF_CYCLE <cycle_id>`.
 
-Preferred launcher: `.pipe/p1/p1-cron-kick.sh`. Ralph/cron should call the launcher or construct the kick using the canonical template.
+Preferred launcher: `.deadf/bin/cron-kick.sh`. Ralph/cron should call the launcher or construct the kick using the canonical template.
 
 Dual-lock model:
 - Process lock: `.deadf/cron.lock` held by the launcher for the full orchestrator runtime.
 - State lock: `STATE.yaml.flock` held by the orchestrator for atomic R-M-W (VALIDATE + RECORD).
 
 Task list lifecycle (binding):
-- Owner: `.pipe/p1/p1-cron-kick.sh` creates/rotates `.deadf/task_list_id`. `ralph.sh` only passes through if the file exists; otherwise Tasks are disabled (non-fatal).
+- Owner: `.deadf/bin/cron-kick.sh` creates/rotates `.deadf/task_list_id`. `ralph.sh` only passes through if the file exists; otherwise Tasks are disabled (non-fatal).
 - Operator override: if `CLAUDE_CODE_TASK_LIST_ID` is already set in the environment, the launcher must honor it (no overwrite).
 - File: `.deadf/task_list_id` is a single line, bare string, **no trailing newline**. Format `deadf-{project_slug}-{32hex}`, max 80 chars. Validation: non-empty, `[A-Za-z0-9_.-]+`, ≤80 chars; invalid → warn + regenerate.
 - Tracking file: `.deadf/task_list_track` stores last `track.id` for rotation detection.
