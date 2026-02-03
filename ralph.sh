@@ -381,8 +381,8 @@ while true; do
 
     # ── P12 init (research phase) ───────────────────────────────────────
     if [[ "$PHASE" == "research" && ! -f "$PROJECT_PATH/.deadf/seed/P2_DONE" ]]; then
-        log "P2 brainstorm required — launching .pipe/p12-init.sh"
-        if ! "$PROJECT_PATH/.pipe/p12-init.sh" --project "$PROJECT_PATH"; then
+        log "P2 brainstorm required — launching .deadf/bin/init.sh"
+        if ! "$PROJECT_PATH/.deadf/bin/init.sh" --project "$PROJECT_PATH"; then
             log_err "P12 init runner failed"
             set_phase_needs_human
             release_lock
