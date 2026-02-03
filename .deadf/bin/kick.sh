@@ -1,264 +1,152 @@
-#!/bin/bash
-# deadf(ish) Pipeline — kick.sh (Single Cycle Entrypoint)
-# Responsibilities: acquire cycle lock, read STATE.yaml, perform one action,
-# update STATE.yaml atomically, post status, release lock.
-
+#!/usr/bin/env bash
+# deadf(ish) Pipeline — kick.sh (Shared Kick Assembly)
+# Responsibilities: assemble kick message from template, dispatch to Claude Code.
 set -euo pipefail
+IFS=$'\n\t'
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-PROJECT_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+DEADF_ROOT="${DEADF_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd -- "$DEADF_ROOT/.." && pwd)}"
 
-STATE_FILE="$PROJECT_ROOT/.deadf/state/STATE.yaml"
-POLICY_FILE="$PROJECT_ROOT/.deadf/state/POLICY.yaml"
-TEMPLATE_FILE="$PROJECT_ROOT/.deadf/templates/kick/cycle-kick.md"
-STATE_LOCK_FILE="${STATE_FILE}.flock"
-CYCLE_LOCK_FILE="$PROJECT_ROOT/.deadf/cycle.flock"
+STATE_FILE="$DEADF_ROOT/state/STATE.yaml"
+POLICY_FILE="$DEADF_ROOT/state/POLICY.yaml"
+TEMPLATE_FILE="$DEADF_ROOT/templates/kick/cycle-kick.md"
+LOG_DIR="$DEADF_ROOT/logs"
 
-STATE_LOCK_TIMEOUT=5
-STATE_UPDATE_RETRIES=3
-
-LOCK_FD=""
-
-log() { echo "[kick] $(date -u -Iseconds) $*"; }
 log_err() { echo "[kick] $(date -u -Iseconds) ERROR: $*" >&2; }
 
 require_cmd() {
-    command -v "$1" &>/dev/null || { log_err "Required command not found: $1"; exit 1; }
+  command -v "$1" >/dev/null 2>&1 || { log_err "Required command not found: $1"; exit 20; }
 }
 
 preflight() {
-    [[ -f "$STATE_FILE" ]] || { log_err "STATE.yaml not found: $STATE_FILE"; exit 1; }
-    [[ -f "$POLICY_FILE" ]] || { log_err "POLICY.yaml not found: $POLICY_FILE"; exit 1; }
-    [[ -f "$TEMPLATE_FILE" ]] || { log_err "Kick template not found: $TEMPLATE_FILE"; exit 1; }
+  [[ -f "$STATE_FILE" ]] || { log_err "STATE.yaml not found: $STATE_FILE"; exit 20; }
+  [[ -f "$POLICY_FILE" ]] || { log_err "POLICY.yaml not found: $POLICY_FILE"; exit 20; }
+  [[ -f "$TEMPLATE_FILE" ]] || { log_err "Kick template not found: $TEMPLATE_FILE"; exit 20; }
 
-    require_cmd yq
-    require_cmd flock
-    require_cmd mktemp
-    require_cmd stat
+  mkdir -p "$LOG_DIR" || { log_err "Cannot create log dir: $LOG_DIR"; exit 20; }
+  [[ -w "$LOG_DIR" ]] || { log_err "Log dir not writable: $LOG_DIR"; exit 20; }
 
-    if ! yq --version 2>/dev/null | grep -qE 'version v?4\.'; then
-        log_err "yq v4.x required (mikefarah/yq). Found: $(yq --version 2>/dev/null || echo 'unknown')"
-        exit 1
-    fi
+  require_cmd yq
+  require_cmd mktemp
+  require_cmd tee
+  require_cmd od
+  require_cmd tr
+
+  if ! yq --version 2>/dev/null | grep -qE 'version v?4\.'; then
+    log_err "yq v4.x required (mikefarah/yq). Found: $(yq --version 2>/dev/null || echo 'unknown')"
+    exit 20
+  fi
 }
 
-load_template() {
-    TEMPLATE_CONTENT=$(<"$TEMPLATE_FILE") || {
-        log_err "Failed to read kick template: $TEMPLATE_FILE"
-        exit 1
-    }
+num_or_default() {
+  local val="$1"
+  local def="$2"
+  if [[ "$val" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$val"
+  else
+    printf '%s' "$def"
+  fi
 }
 
-STAT_STYLE=""
-init_stat_style() {
-    if stat -c '%a' "$STATE_FILE" >/dev/null 2>&1; then
-        STAT_STYLE="gnu"
-    elif stat -f '%Lp' "$STATE_FILE" >/dev/null 2>&1; then
-        STAT_STYLE="bsd"
-    else
-        log_err "stat does not support -c '%a' (GNU) or -f '%Lp' (BSD). Cannot preserve permissions safely."
-        exit 1
-    fi
+yq_read() {
+  local query="$1"
+  local file="$2"
+  local out
+  if ! out=$(yq -r "$query" "$file" 2>/dev/null); then
+    log_err "Failed to read: $query from $file"
+    exit 20
+  fi
+  printf '%s' "$out"
 }
 
-stat_perms() {
-    case "$STAT_STYLE" in
-        gnu) stat -c '%a' "$1" ;;
-        bsd) stat -f '%Lp' "$1" ;;
-        *) return 1 ;;
-    esac
+parse_template() {
+  local tpl
+  tpl=$(awk 'BEGIN{found=0} /^```text[[:space:]]*$/ {found=1; next} /^```/ {if(found){exit}} found{print}' "$TEMPLATE_FILE")
+  if [[ -z "$tpl" ]]; then
+    log_err "Template parse failed: $TEMPLATE_FILE"
+    exit 20
+  fi
+  printf '%s' "$tpl"
 }
 
-acquire_cycle_lock() {
-    exec {LOCK_FD}> "$CYCLE_LOCK_FILE" || { log_err "Cannot open lock file: $CYCLE_LOCK_FILE"; exit 1; }
-    if ! flock -n "$LOCK_FD"; then
-        log "Cycle lock held by another session."
-        exit 70
-    fi
-    printf '%s %s\n' "$$" "$(date -u -Iseconds)" >&"$LOCK_FD" || true
-}
-
-release_cycle_lock() {
-    if [[ -n "${LOCK_FD:-}" ]]; then
-        flock -u "$LOCK_FD" 2>/dev/null || true
-        exec {LOCK_FD}>&- || true
-        LOCK_FD=""
-    fi
-}
-
-read_field() {
-    yq -r ".${1} // \"null\"" "$STATE_FILE" 2>/dev/null || echo "null"
-}
-
-update_state_expr() {
-    local expr="$1"
-    local attempt tmp
-    for ((attempt=1; attempt<=STATE_UPDATE_RETRIES; attempt++)); do
-        tmp=$(mktemp "${STATE_FILE}.kick.tmp.XXXXXX") || {
-            log_err "FAILED to create temp file for STATE.yaml update (attempt ${attempt}/${STATE_UPDATE_RETRIES})"
-            sleep 0.2
-            continue
-        }
-        if (
-            flock -w "$STATE_LOCK_TIMEOUT" 9 || {
-                log_err "Cannot acquire lock on STATE.yaml (attempt ${attempt}/${STATE_UPDATE_RETRIES})"
-                exit 10
-            }
-            local orig_perms
-            orig_perms=$(stat_perms "$STATE_FILE" 2>/dev/null) || orig_perms=""
-            if ! yq eval "$expr" "$STATE_FILE" > "$tmp" 2>/dev/null; then
-                log_err "FAILED to write STATE.yaml (attempt ${attempt}/${STATE_UPDATE_RETRIES})"
-                rm -f "$tmp"
-                exit 11
-            fi
-            if ! mv -f "$tmp" "$STATE_FILE"; then
-                log_err "FAILED to mv tmp file for STATE.yaml (attempt ${attempt}/${STATE_UPDATE_RETRIES})"
-                rm -f "$tmp"
-                exit 12
-            fi
-            [[ -n "$orig_perms" ]] && chmod "$orig_perms" "$STATE_FILE" 2>/dev/null || true
-        ) 9>"$STATE_LOCK_FILE"; then
-            return 0
-        fi
-        rm -f "$tmp"
-        sleep 0.2
-    done
-    return 1
-}
-
-set_phase_needs_human() {
-    update_state_expr '.phase = "needs_human"'
-}
-
-update_sub_step() {
-    local next_step="$1"
-    local action="$2"
-    local details="$3"
-
-    update_state_expr "\
-        .task.sub_step = \"${next_step}\" |\
-        .last_action = \"${action}\" |\
-        .last_result.ok = true |\
-        .last_result.details = \"${details}\""
-}
-
-post_status() {
-    local emoji="$1"
-    local action="$2"
-    local details="$3"
-    local next_step="$4"
-
-    local channel
-    channel=$(yq -r '.heartbeat.discord_channel // ""' "$POLICY_FILE" 2>/dev/null || true)
-    if [[ -z "$channel" || "$channel" == "null" ]]; then
-        log_err "Discord channel not configured in POLICY.yaml"
-        return 1
-    fi
-
-    if ! command -v openclaw &>/dev/null; then
-        log_err "openclaw not found; cannot post Discord status"
-        return 1
-    fi
-
-    local iteration project task_id
-    iteration=$(read_field "loop.iteration")
-    project=$(read_field "project")
-    task_id=$(read_field "task.id")
-
-    local arrow
-    arrow=$'\u2192'
-    local msg
-    msg="${emoji} #${iteration} | ${action} | ${project}:${task_id} | ${details} | ${arrow} ${next_step}"
-
-    openclaw message send --channel discord --to "$channel" --message "$msg"
-}
-
-validate_state() {
-    if ! yq '.' "$STATE_FILE" > /dev/null 2>&1; then
-        log_err "STATE.yaml is unparseable"
-        set_phase_needs_human 2>/dev/null || true
-        exit 1
-    fi
-}
-
-# ── Stub Actions ──────────────────────────────────────────────────────────
-generate_task() {
-    log "Stub: generate_task"
-    local next_step="implement"
-    local details="stub: advance to implement"
-    update_sub_step "$next_step" "generate_task" "$details"
-    post_status ":gear:" "generate_task" "$details" "execute.${next_step}" || log_err "Failed to post status"
-}
-
-implement_task() {
-    log "Stub: implement_task"
-    local next_step="verify"
-    local details="stub: advance to verify"
-    update_sub_step "$next_step" "implement_task" "$details"
-    post_status ":hammer_and_wrench:" "implement_task" "$details" "execute.${next_step}" || log_err "Failed to post status"
-}
-
-verify_task() {
-    log "Stub: verify_task"
-    local next_step="reflect"
-    local details="stub: advance to reflect"
-    update_sub_step "$next_step" "verify_task" "$details"
-    post_status ":mag:" "verify_task" "$details" "execute.${next_step}" || log_err "Failed to post status"
-}
-
-reflect() {
-    log "Stub: reflect"
-    local next_step="generate"
-    local details="stub: advance to generate"
-    update_sub_step "$next_step" "reflect" "$details"
-    post_status ":thought_balloon:" "reflect" "$details" "execute.${next_step}" || log_err "Failed to post status"
+generate_cycle_id() {
+  local iteration="$1"
+  local iteration_plus_one=$((iteration + 1))
+  local hex
+  hex=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+  printf 'cycle-%s-%s' "$iteration_plus_one" "$hex"
 }
 
 main() {
-    preflight
-    load_template
-    init_stat_style
-    acquire_cycle_lock
-    trap release_cycle_lock EXIT
+  preflight
 
-    validate_state
+  local project_path project_name
+  project_path="$PROJECT_ROOT"
+  project_name=$(basename -- "$project_path")
 
-    local phase sub_step
-    phase=$(read_field "phase")
-    sub_step=$(read_field "task.sub_step")
+  local cycle_status phase sub_step iteration_raw task_id retry_count_raw max_retries_raw
+  cycle_status=$(yq_read '.cycle.status // "unknown"' "$STATE_FILE")
+  phase=$(yq_read '.phase // "unknown"' "$STATE_FILE")
+  sub_step=$(yq_read '.task.sub_step // "-"' "$STATE_FILE")
+  iteration_raw=$(yq_read '.loop.iteration // 0' "$STATE_FILE")
+  task_id=$(yq_read '.task.id // "-"' "$STATE_FILE")
+  retry_count_raw=$(yq_read '.task.retry_count // 0' "$STATE_FILE")
+  max_retries_raw=$(yq_read '.task.max_retries // 0' "$STATE_FILE")
 
-    case "$phase" in
-        needs_human)
-            post_status ":warning:" "needs_human" "manual intervention required" "needs_human" || log_err "Failed to post status"
-            exit 2
-            ;;
-        complete)
-            post_status ":tada:" "complete" "pipeline complete" "complete" || log_err "Failed to post status"
-            exit 0
-            ;;
-        execute)
-            case "$sub_step" in
-                generate) generate_task ;;
-                implement) implement_task ;;
-                verify) verify_task ;;
-                reflect) reflect ;;
-                *)
-                    log_err "Unknown task.sub_step: $sub_step"
-                    set_phase_needs_human 2>/dev/null || true
-                    post_status ":warning:" "needs_human" "unknown sub_step: ${sub_step}" "needs_human" || log_err "Failed to post status"
-                    exit 2
-                    ;;
-            esac
-            ;;
-        *)
-            log_err "Unknown phase: $phase"
-            set_phase_needs_human 2>/dev/null || true
-            post_status ":warning:" "needs_human" "unknown phase: ${phase}" "needs_human" || log_err "Failed to post status"
-            exit 2
-            ;;
-    esac
+  local iteration retry_count max_retries
+  iteration=$(num_or_default "$iteration_raw" 0)
+  retry_count=$(num_or_default "$retry_count_raw" 0)
+  max_retries=$(num_or_default "$max_retries_raw" 0)
 
-    exit 0
+  local state_hint
+  state_hint="${cycle_status} ${phase}:${sub_step} #${iteration} task=${task_id} retry=${retry_count}/${max_retries}"
+
+  local mode discord_channel
+  mode=$(yq_read '.mode // "unknown"' "$STATE_FILE")
+  discord_channel=$(yq_read '.heartbeat.discord_channel // "unknown"' "$POLICY_FILE")
+  if [[ -z "$discord_channel" || "$discord_channel" == "null" ]]; then
+    discord_channel="unknown"
+  fi
+
+  local cycle_id
+  if [[ -n "${CYCLE_ID:-}" ]]; then
+    cycle_id="$CYCLE_ID"
+  else
+    cycle_id=$(generate_cycle_id "$iteration")
+  fi
+
+  local task_list_id
+  task_list_id="${CLAUDE_CODE_TASK_LIST_ID:-}"
+
+  local kick_template kick_message
+  kick_template=$(parse_template)
+
+  kick_message="$kick_template"
+  kick_message=${kick_message//\{PROJECT_NAME\}/$project_name}
+  kick_message=${kick_message//\{PROJECT_PATH\}/$project_path}
+  kick_message=${kick_message//\{CYCLE_ID\}/$cycle_id}
+  kick_message=${kick_message//\{MODE\}/$mode}
+  kick_message=${kick_message//\{STATE_HINT\}/$state_hint}
+  kick_message=${kick_message//\{DISCORD_CHANNEL\}/$discord_channel}
+  kick_message=${kick_message//\{TASK_LIST_ID\}/$task_list_id}
+
+  local claude_exe
+  claude_exe="${P1_CLAUDE_BIN:-${CLAUDE_BIN:-claude}}"
+  if ! command -v "$claude_exe" >/dev/null 2>&1; then
+    log_err "Claude Code CLI not found: $claude_exe"
+    exit 21
+  fi
+
+  "$claude_exe" --print --allowedTools "Read,Write,Edit,Bash,Task,Glob,Grep" "$kick_message" \
+    2>&1 | tee "$LOG_DIR/cycle-${cycle_id}.log"
+  local rc=${PIPESTATUS[0]}
+  if [[ $rc -ne 0 ]]; then
+    log_err "Claude Code CLI exited non-zero: $rc"
+    exit 21
+  fi
+
+  exit 0
 }
 
 main "$@"
