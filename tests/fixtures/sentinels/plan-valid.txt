@@ -1,0 +1,20 @@
+Random prelude text.
+
+<<<PLAN:V1:NONCE=4F2C9A>>>
+TASK_ID=parser_unify
+TITLE="Unify sentinel parsers"
+SUMMARY=
+  Implement a shared parser core and per-block validators.
+  Preserve PLAN behavior exactly.
+FILES:
+- path=.deadf/bin/parse-blocks.py action=add rationale="Single unified parser"
+- path=extract_plan.py action=modify rationale="Use parse-blocks plan wrapper"
+ACCEPTANCE:
+- id=AC1 text="parse-blocks.py plan emits JSON on valid input"
+- id=AC2 text="Nonce mismatch exits with code 2"
+ESTIMATED_DIFF=180
+NOTES=
+  Keep it stdlib-only.
+<<<END_PLAN:NONCE=4F2C9A>>>
+
+Trailing text.

@@ -1,0 +1,11 @@
+<<<PLAN:V1:NONCE=4F2C9A>>>
+TASK_ID=parser_unify
+TITLE=Unquoted title
+SUMMARY=
+  Missing quotes should fail.
+FILES:
+- path=.deadf/bin/parse-blocks.py action=add rationale="Single unified parser"
+ACCEPTANCE:
+- id=AC1 text="This should not pass"
+ESTIMATED_DIFF=120
+<<<END_PLAN:NONCE=4F2C9A>>>

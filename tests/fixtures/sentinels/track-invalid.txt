@@ -1,0 +1,9 @@
+<<<TRACK:V1:NONCE=4F2C9A>>>
+TRACK_ID=core_bootstrap
+NAME="Bootstrap unified parser"
+PHASE=build
+GOAL="Implement a shared parser and fixture set"
+REQUIREMENTS=stdlib,fixtures,docs
+ESTIMATED_TASKS=5
+PHASE_BLOCKED=true
+<<<END_TRACK:NONCE=4F2C9A>>>

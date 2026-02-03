@@ -36,8 +36,13 @@ coverage.xml
 *.sh.bak
 
 # === deadf(ish) Pipeline Runtime State ===
-# The .deadf/ directory holds runtime state (locks, logs) — never commit
-.deadf/
+# In TARGET projects, .deadf/ holds runtime state (locks, logs) — never commit.
+# In THIS repo (deadfish-cli), .deadf/ IS the canonical deployed tree — DO commit.
+# Only ignore runtime-specific files:
+.deadf/runtime/
+.deadf/state/STATE.yaml
+.deadf/state/STATE.yaml.flock
+.deadf/state/POLICY.yaml
 .deadf/task_list_id
 .deadf/task_list_id.prev
 .deadf/task_list_track

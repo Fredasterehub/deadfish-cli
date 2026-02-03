@@ -1,0 +1,23 @@
+<<<PLAN:V1:NONCE=AAAAAA>>>
+TASK_ID=task_one
+TITLE="First plan"
+SUMMARY=
+  First summary.
+FILES:
+- path=README.md action=modify rationale="Update docs"
+ACCEPTANCE:
+- id=AC1 text="First plan accepted"
+ESTIMATED_DIFF=10
+<<<END_PLAN:NONCE=AAAAAA>>>
+
+<<<PLAN:V1:NONCE=AAAAAA>>>
+TASK_ID=task_two
+TITLE="Second plan"
+SUMMARY=
+  Second summary.
+FILES:
+- path=README.md action=modify rationale="Update docs again"
+ACCEPTANCE:
+- id=AC1 text="Second plan accepted"
+ESTIMATED_DIFF=20
+<<<END_PLAN:NONCE=AAAAAA>>>
