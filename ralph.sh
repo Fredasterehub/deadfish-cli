@@ -24,8 +24,9 @@ CYCLE_TIMEOUT="${RALPH_TIMEOUT:-600}"
 POLL_INTERVAL="${RALPH_POLL:-15}"
 LOG_DIR="$PROJECT_PATH/.deadf/logs"
 LOCK_FILE="$PROJECT_PATH/.deadf/ralph.lock"
-STATE_FILE="$PROJECT_PATH/STATE.yaml"
+STATE_FILE="$PROJECT_PATH/.deadf/state/STATE.yaml"
 STATE_LOCK_FILE="${STATE_FILE}.flock"
+KICK_CMD="$PROJECT_PATH/.deadf/bin/kick.sh"
 MAX_LOG_FILES="${RALPH_MAX_LOGS:-50}"
 ROTATE_LOGS="${RALPH_ROTATE_LOGS:-1}"
 DISPATCH_TIMEOUT="${RALPH_DISPATCH_TIMEOUT:-$CYCLE_TIMEOUT}"
@@ -47,6 +48,7 @@ STATE_UPDATE_RETRIES=3
 # ── Preflight ──────────────────────────────────────────────────────────────
 [[ -d "$PROJECT_PATH" ]] || { echo "[ralph] ERROR: Project path does not exist: $PROJECT_PATH" >&2; exit 1; }
 [[ -f "$STATE_FILE" ]]   || { echo "[ralph] ERROR: STATE.yaml not found: $STATE_FILE" >&2; exit 1; }
+[[ -x "$KICK_CMD" ]]     || { echo "[ralph] ERROR: kick.sh not found or not executable: $KICK_CMD" >&2; exit 1; }
 
 mkdir -p "$LOG_DIR" || { echo "[ralph] ERROR: Cannot create log dir: $LOG_DIR" >&2; exit 1; }
 
@@ -60,25 +62,6 @@ command -v pgrep &>/dev/null    || { echo "[ralph] ERROR: pgrep required but not
 command -v stat &>/dev/null     || { echo "[ralph] ERROR: stat required but not found" >&2; exit 1; }
 command -v flock &>/dev/null    || { echo "[ralph] ERROR: flock required but not found" >&2; exit 1; }
 command -v mktemp &>/dev/null   || { echo "[ralph] ERROR: mktemp required but not found" >&2; exit 1; }
-
-# ── Dispatch Configuration ─────────────────────────────────────────────────
-DISPATCH_CMD="${RALPH_DISPATCH_CMD:?RALPH_DISPATCH_CMD must be set (e.g. orchestrator session send --message)}"
-if yq -e 'type == "!!seq"' <<<"$DISPATCH_CMD" >/dev/null 2>&1; then
-    mapfile -t DISPATCH_CMD_ARR < <(yq -r '.[]' <<<"$DISPATCH_CMD" 2>/dev/null)
-    if [[ ${#DISPATCH_CMD_ARR[@]} -eq 0 ]]; then
-        echo "[ralph] ERROR: RALPH_DISPATCH_CMD is an empty JSON/YAML array" >&2
-        exit 1
-    fi
-else
-    echo "[ralph] WARN: RALPH_DISPATCH_CMD is not a JSON/YAML array; falling back to whitespace split (quoting not supported)" >&2
-    read -r -a DISPATCH_CMD_ARR <<<"$DISPATCH_CMD"
-    if [[ ${#DISPATCH_CMD_ARR[@]} -eq 0 ]]; then
-        echo "[ralph] ERROR: RALPH_DISPATCH_CMD is empty or whitespace-only" >&2
-        exit 1
-    fi
-fi
-DISPATCH_EXE="${DISPATCH_CMD_ARR[0]}"
-command -v "$DISPATCH_EXE" &>/dev/null || { echo "[ralph] ERROR: dispatch command not found on PATH: $DISPATCH_EXE" >&2; exit 1; }
 
 if command -v timeout &>/dev/null; then
     TIMEOUT_CMD="timeout"
@@ -358,9 +341,6 @@ MAX_ITERATIONS=$(get_max_iter)
 [[ "$MAX_ITERATIONS" =~ ^[0-9]+$ ]] || MAX_ITERATIONS=200
 log "Max iterations: $MAX_ITERATIONS"
 
-RUNNING_WAITED=0
-DISPATCH_FAILURES=0
-
 while true; do
     # Check for shutdown between iterations
     [[ "$SHUTTING_DOWN" -eq 1 ]] && break
@@ -390,22 +370,6 @@ while true; do
         exit 1
     fi
 
-    # ── Wait if cycle already running (with timeout) ───────────────────
-    if [[ "$(get_cycle_status)" == "running" ]]; then
-        sleep "$POLL_INTERVAL"
-        RUNNING_WAITED=$((RUNNING_WAITED + POLL_INTERVAL))
-        log "Cycle already running. Waited ${RUNNING_WAITED}/${CYCLE_TIMEOUT}s"
-        if [[ "$RUNNING_WAITED" -ge "$CYCLE_TIMEOUT" ]]; then
-            log "⏰ Existing cycle timed out after ${CYCLE_TIMEOUT}s in running state"
-            require_state_update "cycle.status=timed_out" set_cycle_timed_out
-            require_state_update "phase=needs_human" set_phase_needs_human
-            release_lock
-            exit 1
-        fi
-        continue
-    fi
-    RUNNING_WAITED=0
-
     # ── P2 Brainstorm (research phase) ───────────────────────────────────
     if [[ "$PHASE" == "research" && ! -f "$PROJECT_PATH/.deadf/seed/P2_DONE" ]]; then
         log "P2 brainstorm required — launching .pipe/p12-init.sh"
@@ -426,89 +390,52 @@ while true; do
     rotate_logs
 
     # ── Kick a new cycle ─────────────────────────────────────────────────
-    CYCLE_ID=$(generate_cycle_id)
     local_iter="$ITERATION"
     [[ "$local_iter" =~ ^[0-9]+$ ]] || local_iter=0
 
-    log "── Cycle kick (iter=$local_iter, phase=$PHASE, id=${CYCLE_ID:0:8}...) ──"
+    log "── Cycle kick (iter=$local_iter, phase=$PHASE) ──"
 
     CYCLE_LOG="$LOG_DIR/cycle-${local_iter}.log"
 
-    # Send cycle kick to orchestrator
-    CYCLE_MESSAGE="DEADF_CYCLE $CYCLE_ID
-project: $PROJECT_PATH
-mode: $MODE
-Execute ONE cycle. Follow iteration contract. Reply: CYCLE_OK | CYCLE_FAIL | DONE"
-
-    "$TIMEOUT_CMD" "$DISPATCH_TIMEOUT" "${DISPATCH_CMD_ARR[@]}" "$CYCLE_MESSAGE" \
+    "$TIMEOUT_CMD" "$DISPATCH_TIMEOUT" "$KICK_CMD" \
         2>&1 | tee -a "$CYCLE_LOG"
-    dispatch_rc=${PIPESTATUS[0]}
-    if [[ "$dispatch_rc" -ne 0 ]]; then
-        log_err "Failed to send cycle kick (dispatch exit code: $dispatch_rc)"
-        echo "$(date -u -Iseconds) KICK_FAILED" >> "$CYCLE_LOG"
-        DISPATCH_FAILURES=$((DISPATCH_FAILURES + 1))
-        backoff=$(( DISPATCH_FAILURES * DISPATCH_FAILURES * 5 ))
-        [[ "$backoff" -gt 300 ]] && backoff=300
-        log "Dispatch failure #${DISPATCH_FAILURES}. Backing off ${backoff}s..."
-        if [[ "$DISPATCH_FAILURES" -ge 5 ]]; then
-            log_err "Too many consecutive dispatch failures ($DISPATCH_FAILURES). Giving up."
+    kick_rc=${PIPESTATUS[0]}
+
+    if [[ "$kick_rc" -eq 124 || "$kick_rc" -eq 137 ]]; then
+        log "⏰ kick.sh timeout after ${DISPATCH_TIMEOUT}s"
+        echo "$(date -u -Iseconds) TIMEOUT after ${DISPATCH_TIMEOUT}s" >> "$CYCLE_LOG"
+        require_state_update "cycle.status=timed_out" set_cycle_timed_out
+        require_state_update "phase=needs_human" set_phase_needs_human
+        release_lock
+        exit 1
+    fi
+
+    case "$kick_rc" in
+        0)
+            log "Cycle complete (kick exit 0)"
+            ;;
+        1)
+            log_err "Cycle failed (kick exit 1). Retrying later."
+            sleep "$POLL_INTERVAL"
+            continue
+            ;;
+        2)
+            log "Needs human intervention (kick exit 2). Pausing."
+            release_lock
+            exit 1
+            ;;
+        70)
+            log "Cycle lock held by another session (kick exit 70). Waiting."
+            sleep "$POLL_INTERVAL"
+            continue
+            ;;
+        *)
+            log_err "Unexpected kick exit code: $kick_rc"
             set_phase_needs_human
             release_lock
             exit 1
-        fi
-        sleep "$backoff"
-        continue
-    fi
-
-    # ── Wait for cycle completion ────────────────────────────────────────
-    WAITED=0
-    SAW_RUNNING=0
-    while true; do
-        sleep "$POLL_INTERVAL"
-        WAITED=$((WAITED + POLL_INTERVAL))
-
-        # Check for shutdown during wait
-        [[ "$SHUTTING_DOWN" -eq 1 ]] && break
-
-        # Re-validate state each poll
-        validate_state
-
-        CS=$(get_cycle_status)
-        PH=$(get_phase)
-
-        if [[ "$CS" == "running" ]]; then
-            SAW_RUNNING=1
-        fi
-
-        # Cycle completed normally
-        if [[ "$CS" == "complete" || "$CS" == "failed" || "$CS" == "timed_out" ]]; then
-            log "Cycle done (status=$CS, waited=${WAITED}s)"
-            break
-        fi
-        if [[ "$CS" == "idle" && "$SAW_RUNNING" -eq 1 ]]; then
-            log "Cycle done (status=$CS, waited=${WAITED}s)"
-            break
-        fi
-
-        # Phase changed to terminal state
-        if [[ "$PH" == "complete" || "$PH" == "needs_human" ]]; then
-            log "Phase changed to $PH during cycle (waited=${WAITED}s)"
-            break
-        fi
-
-        # Timeout enforcement
-        if [[ "$WAITED" -ge "$CYCLE_TIMEOUT" ]]; then
-            log "⏰ Cycle timeout after ${CYCLE_TIMEOUT}s"
-            echo "$(date -u -Iseconds) TIMEOUT after ${CYCLE_TIMEOUT}s" >> "$CYCLE_LOG"
-            require_state_update "cycle.status=timed_out" set_cycle_timed_out
-            require_state_update "phase=needs_human" set_phase_needs_human
-            release_lock
-            exit 1
-        fi
-    done
-
-    # Reset dispatch failure counter on successful cycle
-    DISPATCH_FAILURES=0
+            ;;
+    esac
 
     # Brief pause between cycles to avoid hammering
     sleep 2
