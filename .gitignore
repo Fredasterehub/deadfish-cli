@@ -1,58 +1,6 @@
-# === OS ===
-.DS_Store
-Thumbs.db
-Desktop.ini
-._*
-
-# === Editor / IDE ===
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.project
-.settings/
-
-# === Python ===
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.venv/
-venv/
-env/
-.eggs/
-*.egg-info/
-dist/
-build/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-coverage.xml
-
-# === Shell ===
-*.sh.bak
-
-# === deadf(ish) Pipeline Runtime State ===
-# In TARGET projects, .deadf/ holds runtime state (locks, logs) — never commit.
-# In THIS repo (deadfish-cli), .deadf/ IS the canonical deployed tree — DO commit.
-# Only ignore runtime-specific files:
-.deadf/runtime/
-.deadf/state/STATE.yaml
-.deadf/state/STATE.yaml.flock
-.deadf/state/POLICY.yaml
-.deadf/task_list_id
-.deadf/task_list_id.prev
-.deadf/task_list_track
-
-# === Project Execution State (template outputs) ===
-# These are generated per-project when used as a template
-TASK.md
-STATE.md
-tracks/*/
-pivots/
-
-# === Logs ===
-*.log
+.pipe/*/plan-*.md
+.pipe/*/synthesis-*.md
+.pipe/*-codex-prompt.md
+.pipe/reviews/
+.pipe/restructure/
+.deadf/cycle.flock
