@@ -1,0 +1,108 @@
+# deadf(ish) manifest — auto-generated file inventory
+# Run: sha256sum on each file to verify integrity
+version: "3.0"
+generated_at: "2026-02-03T05:17:00Z"
+
+files:
+  - path: .deadf/bin/brainstorm.sh
+    sha256: a11edea380c58e963cff897ef4069281227f357af87cf3311d94f99868b80634
+  - path: .deadf/bin/budget-check.sh
+    sha256: fad02e5ccafba96ab45d1ee2bed52c9bb7a910bbb259414c915b591d296bc36c
+  - path: .deadf/bin/build-verdict.py
+    sha256: bc89b9fca773b49c51102869cbb57ea0154c1587764612b5ca1ce4a738100870
+  - path: .deadf/bin/cron-kick.sh
+    sha256: 966ad4a8e141af43be7f2d303c275524d6ac7cecec60e6c23517bf4c12c12bdc
+  - path: .deadf/bin/init-collect.sh
+    sha256: f591d0d477790953e2005a0e614bb13a2fbee4865f7db8c2a52c09315779de78
+  - path: .deadf/bin/init-confirm.sh
+    sha256: 61ad0c1491bc20995080f3fb622160700fd2954e41d41500ebb1e0c38b291d04
+  - path: .deadf/bin/init-detect.sh
+    sha256: 181266689c7bdbc520ce367bcddfdc29d6b43fae156da828dcfaa4e1b0d14b3d
+  - path: .deadf/bin/init-inject.sh
+    sha256: 76b7f2e15b7702a1109bfa00b1782aef178c2907c818ca6017a549596e2fb0a0
+  - path: .deadf/bin/init-map.sh
+    sha256: 7adb910b7bead7f23853c53ef5c956728ddf30b0977a8c26e4b4627fa3a4bded
+  - path: .deadf/bin/init.sh
+    sha256: bbddee2ba02e1218e6bf3ba7f6fe0076cbcdec0e6dfed4222565fbc287340cde
+  - path: .deadf/bin/kick.sh
+    sha256: 5f31c09c6f9383f3d786f1e71151d8f569789ae86d3ad983a9592ee92746479d
+  - path: .deadf/bin/lint-templates.py
+    sha256: a0496c0f81ad59fa9693f701fbecdce1838c182b3eeaee1c6c418c04cb28abc2
+  - path: .deadf/bin/parse-blocks.py
+    sha256: c30f657ccb75c4169e2108bb76827ba90af7a2ba9bcb92f56d5d6b87e709b22d
+  - path: .deadf/bin/verify.sh
+    sha256: 2ce18505f23429a325a2b5c9956cd4ff6423b10064e9375c46b4cf0d747c056e
+  - path: .deadf/contracts/policy/policy.schema.json
+    sha256: 31063916a0a3824067f29db663d49db4b05e9e49ebf4c09eab021d4bf2924585
+  - path: .deadf/contracts/schemas/state.v2.yaml
+    sha256: 48ffcb19ed72e3eb8fa059c90a4e0a513a14ac6fd9abeee4c9ec5f58b81821bc
+  - path: .deadf/contracts/schemas/task-packet.v1.yaml
+    sha256: 3660b0cff14ce834c37466e096788887160bd94feb13deba25fcc7ea22f0fe2b
+  - path: .deadf/contracts/schemas/verify-result.v1.json
+    sha256: 0e2f2f95efa78a273828fc442a3f4ea87fb413000d97b571855b7cb354baee81
+  - path: .deadf/contracts/sentinel/diagnostic.v1.md
+    sha256: dab4c1877de248f52186ac029abd18a19a79429fa2c43155a5db11366c65bc4f
+  - path: .deadf/contracts/sentinel/plan.v1.md
+    sha256: de39f692da9909d0717fce38de1ab5ff125da8e6a1a895778275cefbd4da00c8
+  - path: .deadf/contracts/sentinel/qa-review.v1.md
+    sha256: cb1648cbc255213ae91445d55bff85e4523424111884bc8a236d97074f91b5fa
+  - path: .deadf/contracts/sentinel/reflect.v1.md
+    sha256: c07159e96707aaaf9a6554b4528163c8267ed30f991deb75b67c5a204136d351
+  - path: .deadf/contracts/sentinel/spec.v1.md
+    sha256: 6363446e787f1a93d789ed42e94728ad4e2a1449eae2bdd9a486e25e12feaf34
+  - path: .deadf/contracts/sentinel/track.v1.md
+    sha256: 389885b4517d5aff0ab6c3e5c92bce5413660f2dc4733de57502ae993b824b59
+  - path: .deadf/contracts/sentinel/verdict.v1.md
+    sha256: 8518ac3d0b6f15cdd30912e19582187a89882978b9e4180c8ac90bdda80af020
+  - path: .deadf/templates/bootstrap/brainstorm-a2.md
+    sha256: 77334b0148b273b46852d7a5a57f9e62aa3a64203f5f93d45cf66f73e436b634
+  - path: .deadf/templates/bootstrap/brainstorm-a.md
+    sha256: f8d1f62fa408627295d6788416cd56b6b346919f7866399b8e88806e74d6bbe4
+  - path: .deadf/templates/bootstrap/brainstorm-b.md
+    sha256: de091b922bf4acc66ab19aa3f4be505f5afe8e796d62ac2ae0907823a78405b0
+  - path: .deadf/templates/bootstrap/brainstorm-c.md
+    sha256: d14969640e2002505aea8e24a0c14599305d2d5f815bab0875bb27f7e822cda1
+  - path: .deadf/templates/bootstrap/brainstorm-d.md
+    sha256: 33f60c31111c15d33cd5014a415da8a78915e1d9f3e173118b6e6d388bd2e146
+  - path: .deadf/templates/bootstrap/brainstorm-e.md
+    sha256: 734cb1227102178e0e1764aad6c95219ccce45247ca4bac27e0257455d087d32
+  - path: .deadf/templates/bootstrap/brainstorm-f.md
+    sha256: 742150f8f789bd56677a5d0a7a35aad71dd3cf8a9214d77a82f33379f08ed3ee
+  - path: .deadf/templates/bootstrap/brainstorm-g.md
+    sha256: 707aefd3224ba82b82503d38d4f2d3d7b90cd6333fc4544c1a8f4fd4d9b8d612
+  - path: .deadf/templates/bootstrap/project.tmpl.md
+    sha256: 397e316183ee8e0f112bd4db6c13e10bef38d3ea2932dc58e7305acbe09d9890
+  - path: .deadf/templates/bootstrap/requirements.tmpl.md
+    sha256: 97ecc4ff7b16bd89e6852c05fc1dfcc785708840468b47e8e092bc04561a4309
+  - path: .deadf/templates/bootstrap/roadmap.tmpl.md
+    sha256: ff69b3b5dee86b8e5aa9f0101b1adad8fcb6797a12cb7881db8021f6684fb71c
+  - path: .deadf/templates/bootstrap/seed-project-docs.md
+    sha256: 02534928cca3af7ec04a1ff7f9bfbe6bf3086208c8e9b73dfd564f786473d71f
+  - path: .deadf/templates/init/brownfield-brainstorm.md
+    sha256: a9db04883244ffb06b07e97d35ada57687d1a7bd554dfbc2463680799287378e
+  - path: .deadf/templates/init/mapper-agent.md
+    sha256: 4e6cf2a750df69448591c9d44d0c59c49dc6be2cccad860b27f835737273e8e5
+  - path: .deadf/templates/init/synthesizer.md
+    sha256: 334fc946b422ed85b37ad832555a9444357e8227931b73348b832f3c8ad0e480
+  - path: .deadf/templates/kick/cycle-kick.md
+    sha256: b5c81f786280ee40f6fd4e72f3568beaaaf10871911b5a20556192cda550ee98
+  - path: .deadf/templates/repair/auto-diagnose.md
+    sha256: 4668082effa0106650c9d667616fe1b7c4944e420ceed573081c4e5a8052a9c8
+  - path: .deadf/templates/repair/format-repair.md
+    sha256: 22c2943704644da591743cde8631fef5fd22cc80eb254d7bf2d89f9bbba06663
+  - path: .deadf/templates/task/generate-packet.md
+    sha256: cfabd12118011bc99cc85cf8d322422430ad3f3a81a6f3781c3889c1118d6232
+  - path: .deadf/templates/task/implement.md
+    sha256: 54385d4b3c6a94f7a0c4951398a396e0585ca1a4f6bc220fd58a71e06cf8454f
+  - path: .deadf/templates/track/select-track.md
+    sha256: 513a025a869ebab5a3d6d6e1220efd5a026af4190e4c3c78db76a46d217f1ea0
+  - path: .deadf/templates/track/write-plan.md
+    sha256: c5f94f8fe8c509ed634ca643c3a81d19028d21081c627308e40dfbab0a80c0d0
+  - path: .deadf/templates/track/write-spec.md
+    sha256: 769fcabbba6e46f0e5ce1bf0393621dc356750ad3803170711e7415cbad32d4c
+  - path: .deadf/templates/verify/qa-review.md
+    sha256: 961cc5958ec3258d23d4af028c3968d3841bf415b954eec617262af6d529cea8
+  - path: .deadf/templates/verify/reflect.md
+    sha256: 1a88d75a34e25c65059f8a2335a4f6e9e5c42473b4a0a3404baaf7253c758dfd
+  - path: .deadf/templates/verify/verify-criterion.md
+    sha256: d88462f3c277b01e2816882d0f10277099e0129767bd4fc28cdd7cca8e7e7c5c

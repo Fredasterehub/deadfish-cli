@@ -1,0 +1,9 @@
+id: restructure
+name: "Pipeline Restructure v2"
+status: in-progress
+goal: "Reorganize .pipe/ into .deadf/ with semantic naming, split CLAUDE.md, add validation"
+created_at: "2026-02-02T00:00:00Z"
+spec_path: null  # restructure track had no formal spec
+plan_path: .deadf/tracks/restructure/plan.md
+task_count: 7  # phases 1-7
+task_current: 5

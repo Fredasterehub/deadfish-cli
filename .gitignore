@@ -18,7 +18,9 @@
 
 # deadf runtime state (not committed — only bin/, contracts/, templates/ are source)
 .deadf/state/
-.deadf/tracks/
+.deadf/tracks/*/tasks/
+!.deadf/tracks/index.md
+!.deadf/tracks/*/track.yaml
 .deadf/cycle.flock
 .deadf/runtime/
 .deadf/logs/
