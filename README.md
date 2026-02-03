@@ -27,7 +27,7 @@
 
 - 🔄 **Fully autonomous loop** — Plan → Implement → Verify → Commit, no human in the loop
 - 🧠 **Multi-model architecture** — GPT-5.2 plans, GPT-5.2-Codex implements, Claude Opus orchestrates
-- 🔒 **Deterministic verification** — `verify.sh` gates every merge with tests, lint, and build checks
+- 🔒 **Deterministic verification** — `.deadf/bin/verify.sh` gates every merge with tests, lint, and build checks
 - 📁 **Zero hidden state** — Everything lives in filesystem artifacts. Reproducible from a fresh clone.
 - 🛡️ **Strict role separation** — Five actors, each with one job. No actor exceeds its authority.
 - ⏸️ **Pause & resume** — Stop mid-cycle, come back later with `--continue`. No lost context.
@@ -39,27 +39,30 @@
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                     ralph.sh                         │
+│                 .deadf/bin/kick.sh                   │
 │           (loop controller — purely mechanical)      │
 └──────────────────────┬──────────────────────────────┘
                        │ DEADF_CYCLE <id>
                        ▼
 ┌─────────────────────────────────────────────────────┐
 │             Claude Code (Orchestrator)                │
-│   reads STATE.yaml → decides action → dispatches     │
+│ reads .deadf/state/STATE.yaml → decides action →     │
+│                     dispatches                      │
 └────┬──────────────┬───────────────┬─────────────────┘
      │              │               │
      ▼              ▼               ▼
 ┌─────────┐  ┌────────────┐  ┌───────────┐
 │ Planner  │  │Implementer │  │  Verifier  │
-│ GPT-5.2  │  │GPT-5.2-Codex│ │ verify.sh  │
+│ GPT-5.2  │  │GPT-5.2-Codex│ │ .deadf/bin │
+│          │  │             │ │ /verify.sh│
 └────┬─────┘  └──────┬─────┘  └─────┬─────┘
      │               │              │
      └───────────────┴──────────────┘
                      │
                      ▼  CYCLE_OK / CYCLE_FAIL / DONE
 ┌─────────────────────────────────────────────────────┐
-│  ralph.sh parses tokens → updates lock/logs →        │
+│ .deadf/bin/kick.sh parses tokens → updates          │
+│ lock/logs → next cycle or stop                      │
 │  next cycle or stop                                  │
 └─────────────────────────────────────────────────────┘
 ```
@@ -88,12 +91,13 @@ git clone https://github.com/yourorg/deadfish-cli.git
 
 # 2. Copy pipeline files into your project
 cd deadfish-cli
-cp ralph.sh verify.sh extract_plan.py build_verdict.py /path/to/your/project/
-cp CLAUDE.md POLICY.yaml /path/to/your/project/
+cp -R .deadf /path/to/your/project/.deadf
+cp -R .claude /path/to/your/project/.claude
+cp CLAUDE.md /path/to/your/project/
 
 # 3. Create your STATE.yaml
-cp examples/project-structure.md /path/to/your/project/STATE.yaml
-# Edit: set your task, phase, and initial state
+cp examples/project-structure.md /path/to/your/project/.deadf/state/STATE.yaml
+# Edit: set your task, phase, and initial state (POLICY.yaml lives beside it)
 
 # 4. Configure MCP (enables Codex tool access)
 cat > /path/to/your/project/.mcp.json << 'EOF'
@@ -105,7 +109,7 @@ cat > /path/to/your/project/.mcp.json << 'EOF'
 EOF
 
 # 5. Run 🐟
-./ralph.sh /path/to/your/project
+./.deadf/bin/kick.sh
 ```
 
 > 💡 **That's it.** Ralph takes over from here — planning, coding, testing, committing. Check `.deadf/logs/` for what happened.
@@ -118,11 +122,11 @@ deadfish-cli enforces strict role separation. Each actor has exactly one job and
 
 | Actor | Role | Tool | Authority |
 |:------|:-----|:-----|:----------|
-| 🔧 **Ralph** | Loop controller — kicks cycles, enforces timeouts, manages locks | `ralph.sh` | Writes `phase → needs_human` and `cycle.status → timed_out` ONLY |
-| 🧠 **Orchestrator** | Reads state, decides what to do, dispatches work | Claude Code (Opus 4.5) | Reads/writes STATE.yaml, dispatches sub-tasks |
-| 📋 **Planner** | Decomposes work into implementation plans | GPT-5.2 via Codex MCP | Writes plans to `.pipe/` — never touches `src/` |
+| 🔧 **Ralph** | Loop controller — kicks cycles, enforces timeouts, manages locks | `.deadf/bin/kick.sh` | Writes `phase → needs_human` and `cycle.status → timed_out` ONLY |
+| 🧠 **Orchestrator** | Reads state, decides what to do, dispatches work | Claude Code (Opus 4.5) | Reads/writes `.deadf/state/STATE.yaml`, dispatches sub-tasks |
+| 📋 **Planner** | Decomposes work into implementation plans | GPT-5.2 via Codex MCP | Writes plans to `.deadf/logs/` — never touches `src/` |
 | ⚡ **Implementer** | Writes source code — the **only** actor that touches `src/` | GPT-5.2-Codex | Writes code files, nothing else |
-| ✅ **Verifier** | Runs tests/lint/build, produces pass/fail verdict | `verify.sh` + LLM | Read-only on source; writes verdicts |
+| ✅ **Verifier** | Runs tests/lint/build, produces pass/fail verdict | `.deadf/bin/verify.sh` + LLM | Read-only on source; writes verdicts |
 
 > ⚠️ **The Implementer is the only actor that writes code.** The Orchestrator never codes. The Planner never codes. This is non-negotiable.
 
@@ -145,7 +149,7 @@ deadfish-cli enforces strict role separation. Each actor has exactly one job and
 
 ### Execution Modes
 
-Defined in `POLICY.yaml`, set in `STATE.yaml`:
+Defined in `.deadf/state/POLICY.yaml`, set in `.deadf/state/STATE.yaml`:
 
 | Mode | Behavior | Best For |
 |:-----|:---------|:---------|
@@ -159,20 +163,21 @@ Defined in `POLICY.yaml`, set in `STATE.yaml`:
 
 ```
 your-project/
-├── ralph.sh              # 🔧 Loop controller
-├── verify.sh             # ✅ Verification gate
-├── extract_plan.py       # 📋 Plan parser
-├── build_verdict.py      # ✅ Verdict builder
-├── CLAUDE.md             # 🧠 Orchestrator instructions (v2.4.2)
-├── POLICY.yaml           # 🛡️ Pipeline policy & constraints
-├── STATE.yaml            # 📊 Current position (track, task, status)
+├── CLAUDE.md             # 🧠 Orchestrator instructions (v3.0)
+├── .claude/
+│   └── rules/            # 📌 Auto-loaded invariants
 ├── VISION.md             # 🎯 Problem statement & scope
 ├── ROADMAP.md            # 🗺️ Themes & upcoming tracks
 ├── .mcp.json             # 🔌 MCP server config
 ├── .deadf/
+│   ├── bin/              # 🔧 Pipeline scripts (kick, verify, parsers)
+│   ├── contracts/        # 📜 Contract archive
+│   ├── state/            # 🧩 Pipeline state
+│   │   ├── POLICY.yaml   # 🛡️ Pipeline policy & constraints
+│   │   └── STATE.yaml    # 📊 Current position (track, task, status)
+│   ├── templates/        # 🧪 Phase templates + prompts
 │   ├── logs/             # 📝 Execution logs per cycle
-│   ├── notifications/    # 🔔 Human-attention queue
-│   └── ralph.lock        # 🔒 Prevents concurrent runs
+│   └── tracks/           # 🧭 Track metadata
 └── src/                  # Your actual code
 ```
 
@@ -199,7 +204,7 @@ ROADMAP → select track → plan tasks → TASK LOOP:
 
 The verification gate combines deterministic checks with LLM review:
 
-| `verify.sh` | LLM Review | → Result |
+| `.deadf/bin/verify.sh` | LLM Review | → Result |
 |:------------|:-----------|:---------|
 | ❌ FAIL | *(any)* | **FAIL** — always trust the tests |
 | ✅ PASS | ❌ FAIL | **FAIL** — conservative gate |
@@ -223,7 +228,7 @@ The verification gate combines deterministic checks with LLM review:
 
 | Aspect | deadfish-pipeline | deadfish-cli |
 |:-------|:------------------|:-------------|
-| **Controller** | Clawdbot Discord bot | `ralph.sh` (local Bash) |
+| **Controller** | Clawdbot Discord bot | `.deadf/bin/kick.sh` (local Bash) |
 | **Orchestrator** | `clawdbot session send` | `claude --print` |
 | **Sub-agents** | `sessions_spawn` | Claude Code Task tool |
 | **Implementer** | Codex via bot | `codex exec` / Codex MCP |
@@ -238,9 +243,9 @@ The verification gate combines deterministic checks with LLM review:
 
 ## 🗺️ Roadmap
 
-- [x] Copy identical components (extract_plan, build_verdict, verify)
+- [x] Copy identical components (parsers, build-verdict, verify)
 - [x] Rewrite CLAUDE.md for Claude Code CLI
-- [x] Port ralph.sh loop controller
+- [x] Port kick.sh loop controller
 - [ ] Template cleanup + MCP config
 - [ ] Integration test (full end-to-end cycle)
 - [ ] Native Claude Code Task Management integration
@@ -266,23 +271,23 @@ Contributions welcome! The pipeline is designed to be extensible:
 
 **Quick context for AI assistants helping users with this project:**
 
-> deadfish-cli is an autonomous dev pipeline that runs a plan → implement → verify → commit loop using CLI tools. It uses Bash (ralph.sh) as loop controller, Claude Code CLI as orchestrator, GPT-5.2 via Codex MCP as planner, and GPT-5.2-Codex as implementer. The entry point is `ralph.sh <project_path>`.
+> deadfish-cli is an autonomous dev pipeline that runs a plan → implement → verify → commit loop using CLI tools. It uses Bash (`.deadf/bin/kick.sh`) as loop controller, Claude Code CLI as orchestrator, GPT-5.2 via Codex MCP as planner, and GPT-5.2-Codex as implementer. The entry point is `./.deadf/bin/kick.sh`.
 
 ### Key files to read first
-- `CLAUDE.md` — Orchestrator contract defining all agent behavior, phases, and sentinel protocol
-- `ralph.sh` — Loop controller: cycle dispatch, timeouts, locks, log rotation
-- `POLICY.yaml` — Execution modes (yolo/hybrid/interactive), escalation thresholds, rollback policy
-- `STATE.yaml` — Current pipeline position: active track, task, phase, iteration count
-- `verify.sh` — Verification gate: runs tests, lint, build; produces structured JSON verdict
+- `CLAUDE.md` — Orchestrator contract defining all agent behavior, phases, and sentinel protocol (invariants in `.claude/rules/`)
+- `.deadf/bin/kick.sh` — Loop controller: cycle dispatch, timeouts, locks, log rotation
+- `.deadf/state/POLICY.yaml` — Execution modes (yolo/hybrid/interactive), escalation thresholds, rollback policy
+- `.deadf/state/STATE.yaml` — Current pipeline position: active track, task, phase, iteration count
+- `.deadf/bin/verify.sh` — Verification gate: runs tests, lint, build; produces structured JSON verdict
 
 ### Common tasks
-- **Run pipeline:** `./ralph.sh /path/to/project [mode]`
-- **Check state:** `cat STATE.yaml | yq .`
+- **Run pipeline:** `./.deadf/bin/kick.sh`
+- **Check state:** `cat .deadf/state/STATE.yaml | yq .`
 - **View logs:** `ls .deadf/logs/`
-- **Run verification only:** `./verify.sh`
+- **Run verification only:** `./.deadf/bin/verify.sh`
 
 ### Architecture in one paragraph
-Ralph (bash) runs an infinite loop: each cycle it dispatches to Claude Code CLI which reads STATE.yaml, decides the next action, and delegates to either GPT-5.2 (planning via Codex MCP) or GPT-5.2-Codex (implementation via codex exec). After implementation, verify.sh runs deterministic checks (tests/lint/build) and an LLM reviewer produces a combined verdict. On PASS, the orchestrator commits and advances state. On FAIL, it retries or escalates. All state lives in YAML files and all artifacts persist to `.deadf/logs/`.
+Ralph (bash) runs an infinite loop: each cycle it dispatches to Claude Code CLI which reads `.deadf/state/STATE.yaml`, decides the next action, and delegates to either GPT-5.2 (planning via Codex MCP) or GPT-5.2-Codex (implementation via codex exec). After implementation, `.deadf/bin/verify.sh` runs deterministic checks (tests/lint/build) and an LLM reviewer produces a combined verdict. On PASS, the orchestrator commits and advances state. On FAIL, it retries or escalates. All state lives in YAML files and all artifacts persist to `.deadf/logs/`.
 
 > 📄 See [`llms.txt`](llms.txt) for the full machine-readable project context.
 
