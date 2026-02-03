@@ -19,11 +19,31 @@
 
 set -uo pipefail
 
+# ── Task Discovery ─────────────────────────────────────────────────────────
+DEADF_ROOT="${VERIFY_DEADF_ROOT:-${VERIFY_PROJECT_DIR:-$(pwd)}}"
+STATE_FILE="${DEADF_ROOT}/STATE.yaml"
+
+if [[ -n "${VERIFY_TASK_FILE:-}" ]]; then
+  TASK_FILE="${VERIFY_TASK_FILE}"
+else
+  TASK_FILE=""
+  if command -v yq &>/dev/null && [[ -f "$STATE_FILE" ]]; then
+    TRACK_ID=$(yq -r '.track.id // "null"' "$STATE_FILE" 2>/dev/null || echo "null")
+    TASK_CURRENT=$(yq -r '.track.task_current // "null"' "$STATE_FILE" 2>/dev/null || echo "null")
+    if [[ "$TRACK_ID" != "null" && "$TASK_CURRENT" != "null" && "$TASK_CURRENT" =~ ^[0-9]+$ ]]; then
+      TASK_NUM=$(printf '%03d' "$TASK_CURRENT")
+      TASK_FILE="${DEADF_ROOT}/tracks/${TRACK_ID}/tasks/${TASK_NUM}.task.md"
+    fi
+  fi
+
+  if [[ -z "$TASK_FILE" ]]; then
+    TASK_FILE="${DEADF_ROOT}/TASK.md"
+  fi
+fi
+
 # ── Configuration ──────────────────────────────────────────────────────────
 PROJECT_DIR="${VERIFY_PROJECT_DIR:-.}"
 CHECK_TIMEOUT="${VERIFY_CHECK_TIMEOUT:-120}"
-STATE_FILE="${PROJECT_DIR}/STATE.yaml"
-TASK_FILE="${PROJECT_DIR}/TASK.md"
 
 # ── Globals ────────────────────────────────────────────────────────────────
 FAILURES=()
@@ -70,6 +90,35 @@ json_escape() {
 add_failure() {
   FAILURES+=("$1")
   PASS=false
+}
+
+# Parse TASK file for estimated_diff and allowed paths, supporting YAML frontmatter.
+parse_task_file() {
+  local task_file="$1"
+  TASK_ESTIMATED_DIFF=""
+  TASK_ALLOWED_PATHS=()
+
+  [[ -f "$task_file" ]] || return 0
+
+  local first_line
+  first_line=$(head -n 1 "$task_file" 2>/dev/null || true)
+
+  if [[ "$first_line" == "---" ]]; then
+    local frontmatter
+    frontmatter=$(sed -n '2,/^---$/{ /^---$/d; p }' "$task_file" 2>/dev/null || true)
+    if [[ -n "$frontmatter" ]] && command -v yq &>/dev/null; then
+      TASK_ESTIMATED_DIFF=$(printf '%s\n' "$frontmatter" | yq -r '.estimated_diff // ""' 2>/dev/null || true)
+      mapfile -t TASK_ALLOWED_PATHS < <(printf '%s\n' "$frontmatter" | yq -r '.files[].path // empty' 2>/dev/null || true)
+    fi
+  fi
+
+  if [[ -z "$TASK_ESTIMATED_DIFF" ]]; then
+    TASK_ESTIMATED_DIFF=$(grep -oP 'ESTIMATED_DIFF[=:]\s*\K\d+' "$task_file" 2>/dev/null || true)
+  fi
+
+  if [[ ${#TASK_ALLOWED_PATHS[@]} -eq 0 ]]; then
+    mapfile -t TASK_ALLOWED_PATHS < <(grep -oP 'path=\K[^\s]+' "$task_file" 2>/dev/null || true)
+  fi
 }
 
 # ── Check 1: Test Suite ───────────────────────────────────────────────────
@@ -217,13 +266,11 @@ check_diff() {
     diff_lines="$total"
   fi
 
-  # Compare against ESTIMATED_DIFF from TASK.md if available
-  local estimated_diff=""
-  if [[ -f "$TASK_FILE" ]]; then
-    estimated_diff=$(grep -oP 'ESTIMATED_DIFF[=:]\s*\K\d+' "$TASK_FILE" 2>/dev/null || true)
-  fi
+  # Compare against ESTIMATED_DIFF from TASK file if available
+  parse_task_file "$TASK_FILE"
 
-  if [[ -n "$estimated_diff" && "$estimated_diff" -gt 0 ]]; then
+  local estimated_diff="${TASK_ESTIMATED_DIFF}"
+  if [[ -n "$estimated_diff" && "$estimated_diff" =~ ^[0-9]+$ && "$estimated_diff" -gt 0 ]]; then
     # Allow 3x the estimate as a reasonable tolerance
     local max_allowed=$((estimated_diff * 3))
     if [[ "$diff_lines" -gt "$max_allowed" ]]; then
@@ -259,10 +306,11 @@ check_paths() {
     mapfile -t changed_files < <(git show --name-only --format="" HEAD 2>/dev/null)
   fi
 
-  # Get allowed paths from TASK.md (FILES section)
+  # Get allowed paths from TASK file (frontmatter or legacy)
   local -a allowed_paths=()
-  if [[ -f "$TASK_FILE" ]]; then
-    mapfile -t allowed_paths < <(grep -oP 'path=\K[^\s]+' "$TASK_FILE" 2>/dev/null)
+  parse_task_file "$TASK_FILE"
+  if [[ ${#TASK_ALLOWED_PATHS[@]} -gt 0 ]]; then
+    allowed_paths=("${TASK_ALLOWED_PATHS[@]}")
   fi
 
   # Always-blocked patterns (security-sensitive)
