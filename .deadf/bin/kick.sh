@@ -10,6 +10,7 @@ PROJECT_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 
 STATE_FILE="$PROJECT_ROOT/.deadf/state/STATE.yaml"
 POLICY_FILE="$PROJECT_ROOT/.deadf/state/POLICY.yaml"
+TEMPLATE_FILE="$PROJECT_ROOT/.deadf/templates/kick/cycle-kick.md"
 STATE_LOCK_FILE="${STATE_FILE}.flock"
 CYCLE_LOCK_FILE="$PROJECT_ROOT/.deadf/cycle.flock"
 
@@ -28,6 +29,7 @@ require_cmd() {
 preflight() {
     [[ -f "$STATE_FILE" ]] || { log_err "STATE.yaml not found: $STATE_FILE"; exit 1; }
     [[ -f "$POLICY_FILE" ]] || { log_err "POLICY.yaml not found: $POLICY_FILE"; exit 1; }
+    [[ -f "$TEMPLATE_FILE" ]] || { log_err "Kick template not found: $TEMPLATE_FILE"; exit 1; }
 
     require_cmd yq
     require_cmd flock
@@ -38,6 +40,13 @@ preflight() {
         log_err "yq v4.x required (mikefarah/yq). Found: $(yq --version 2>/dev/null || echo 'unknown')"
         exit 1
     fi
+}
+
+load_template() {
+    TEMPLATE_CONTENT=$(<"$TEMPLATE_FILE") || {
+        log_err "Failed to read kick template: $TEMPLATE_FILE"
+        exit 1
+    }
 }
 
 STAT_STYLE=""
@@ -207,6 +216,7 @@ reflect() {
 
 main() {
     preflight
+    load_template
     init_stat_style
     acquire_cycle_lock
     trap release_cycle_lock EXIT
