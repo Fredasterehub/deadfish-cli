@@ -2,7 +2,11 @@
 set -u
 set -o pipefail
 
-manifest_path=".deadf/manifest.yaml"
+# Detect repo root (assuming script is in tests/ subdir)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MANIFEST_PATH="$REPO_ROOT/.deadf/manifest.yaml"
+
 passed=0
 failed=0
 total=0
@@ -30,11 +34,13 @@ fi
 
 # 2) Manifest count vs disk count
 mapfile -t manifest_paths < <(
-  python3 - <<'PY'
+  python3 - "$MANIFEST_PATH" <<'PY'
 import pathlib
+import sys
 import yaml
 
-p = pathlib.Path('/tank/dump/DEV/deadfish-cli/.deadf/manifest.yaml')
+manifest_path = sys.argv[1] if len(sys.argv) > 1 else '.deadf/manifest.yaml'
+p = pathlib.Path(manifest_path)
 with p.open('r', encoding='utf-8') as f:
     data = yaml.safe_load(f)
 
@@ -62,11 +68,13 @@ fi
 
 # 3) Spot-check 3 random hashes
 mapfile -t manifest_hashes < <(
-  python3 - <<'PY'
+  python3 - "$MANIFEST_PATH" <<'PY'
 import pathlib
+import sys
 import yaml
 
-p = pathlib.Path('/tank/dump/DEV/deadfish-cli/.deadf/manifest.yaml')
+manifest_path = sys.argv[1] if len(sys.argv) > 1 else '.deadf/manifest.yaml'
+p = pathlib.Path(manifest_path)
 with p.open('r', encoding='utf-8') as f:
     data = yaml.safe_load(f)
 

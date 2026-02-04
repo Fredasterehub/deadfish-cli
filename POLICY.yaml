@@ -81,6 +81,17 @@ verification:
   #   verify.sh JSON invalid       → CYCLE_FAIL (script bug)
   format_repair_retries: 1         # Max retries for sentinel parse failures
 
+# --- Heartbeat Configuration ---
+heartbeat:
+  enabled: true                    # Master switch for cron-driven execution
+  cycle_interval_min: 3            # Cron fires every N minutes
+  stale_timeout_min: 45            # Force-recover after N min with no heartbeat
+  lease_renewal: true              # Update last_heartbeat_at between sub-steps
+  discord_channel: ""              # Pipeline status channel (set per-project)
+  status_format: "oneliner"        # oneliner | verbose | silent
+  alert_on_needs_human: true       # Post alert when pipeline pauses
+  alert_on_stale_recovery: true    # Post alert when recovering dead session
+
 # --- Baseline Update Policy ---
 baseline:
   # last_good updates ONLY after verify PASS + reflect complete
